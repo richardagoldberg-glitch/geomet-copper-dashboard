@@ -1,9 +1,10 @@
 # Geomet Dashboard Configuration
 # Edit these values as needed
+# API keys are read from .env file (see .env.example)
 
-# metals.dev API key (free at https://metals.dev — sign up, no credit card)
-# Once you have it, paste it here and restart the app
-METALS_DEV_API_KEY = "REDACTED"
+import os
+
+METALS_DEV_API_KEY = os.environ.get("METALS_DEV_API_KEY", "")
 
 # Manual LME fallback ($/metric ton) — update daily if no API key
 # Set to 0 to disable manual override
@@ -30,10 +31,7 @@ COMEX_WAREHOUSE_MT = 534000
 COMEX_WAREHOUSE_DATE = "2026-02-14"
 COMEX_WAREHOUSE_TREND = "building"   # "building" or "drawing"
 
-# FRED API key (free at https://fred.stlouisfed.org/docs/api/api_key.html)
-# Used to auto-fetch the current Fed Funds target rate range
-# Leave empty to use the static values below
-FRED_API_KEY = ""
+FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 
 # Current Fed Funds target rate (used as fallback when FRED_API_KEY is empty)
 FED_FUNDS_RATE = "4.25-4.50"

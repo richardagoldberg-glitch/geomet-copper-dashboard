@@ -10,6 +10,16 @@ from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 import socketserver
 
+# Load .env file into environment before config
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 DATA_DIR = Path(__file__).parent / "data"
 POSITION_CSV = DATA_DIR / "geomet_position.csv"
 SPREAD_HISTORY = DATA_DIR / "spread_history.json"
