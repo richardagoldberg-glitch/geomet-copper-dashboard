@@ -179,6 +179,31 @@ var wc=wh.trend==='building'?'var(--r)':wh.trend==='drawing'?'var(--g)':'var(--t
 h+='<div class="lr"><span class="ll">COMEX Warehouse</span><span class="lv" style="color:'+wc+'">'+n(wh.mt)+' MT '+wa+'</span></div>';
 h+='<div style="text-align:right;font-size:8px;color:var(--td)">as of '+wh.date+'</div>';}
 h+='<div class="sc" id="sk"></div></div>';
+// Morning Report
+h+='<div class="pn rp"><div class="pl">Morning Report</div>';
+if(r&&r.total_inv_po>0){
+var unprShip=r.sales_unpriced_shipped_lbs||0;
+var invPo=r.total_inv_po;
+var pricedUn=r.sales_priced_unshipped_lbs||0;
+var noPriceLbs=invPo-pricedUn;
+var hedgeLots=pos?(Math.round((pos.comex_futures||0)/25000)+Math.round((pos.lme_futures||0)/25000)):0;
+var hedgeLbs=pos?((pos.comex_futures||0)+(pos.lme_futures||0)):0;
+var bal=noPriceLbs-hedgeLbs;
+h+='<div class="dl">';
+h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--b)"><span>Inventory Copper</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(r.inventory_cu_lbs))+'</span></div>';
+h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--b)"><span>PO Waiting to be Received</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(r.po_lbs))+'</span></div>';
+h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--y)"><span>Unpriced Shipments add back</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(unprShip))+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid var(--cu);border-top:2px solid var(--bd)"><span style="font-weight:700">Total Inv/PO</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:16px">'+n(Math.round(invPo))+'</span></div>';
+h+='<div style="height:8px"></div>';
+h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--g)"><span>Priced SO Unshipped</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(pricedUn))+'</span></div>';
+h+='<div style="height:4px"></div>';
+h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--p)"><span>Inv/PO with No Sell Price</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(noPriceLbs))+'</span></div>';
+h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--p)"><span>Hedge to Balance</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+hedgeLots+' Lots \u2014 '+n(Math.round(hedgeLbs))+' LBS</span></div>';
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid '+(bal>0?'var(--r)':'var(--g)') +';border-top:2px solid var(--bd)"><span style="font-weight:700">Balance</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:16px;color:'+(bal>0?'var(--r)':'var(--g)')+'">'+n(Math.round(bal))+'</span></div>';
+h+='</div>';
+if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">Source: '+pos.source_file+' \u2014 '+pos.updated+'</div>';
+}else h+='<div class="nd">No position data</div>';
+h+='</div>';
 // Trend + S/R
 h+='<div class="pn tp"><div class="pl">Trend</div><div class="mg">';
 [['50 DMA',m.ma50,s.above_50],['100 DMA',m.ma100,s.above_100],['200 DMA',m.ma200,s.above_200]].forEach(function(x){
