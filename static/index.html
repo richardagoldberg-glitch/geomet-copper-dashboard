@@ -140,6 +140,7 @@ body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--t
 function applyTheme(t){if(t==='light')document.body.classList.add('light');else document.body.classList.remove('light');var b=document.getElementById('thm');if(b)b.textContent=t==='light'?'\u2600\uFE0F':'\uD83C\uDF19'}
 (function(){var t=localStorage.getItem('cu-theme');if(t)applyTheme(t);fetch('/api/theme').then(function(r){return r.json()}).then(function(d){applyTheme(d.theme);localStorage.setItem('cu-theme',d.theme)}).catch(function(){})})();
 function toggleTheme(){var l=!document.body.classList.contains('light');var t=l?'light':'dark';applyTheme(t);localStorage.setItem('cu-theme',t);fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:t})}).catch(function(){})}
+function syncTheme(){fetch('/api/theme').then(function(r){return r.json()}).then(function(d){applyTheme(d.theme);localStorage.setItem('cu-theme',d.theme)}).catch(function(){})}
 function n(v){return v?Number(v).toLocaleString():'0'}
 function $(id){return document.getElementById(id)}
 async function fd(){try{var r=await fetch('/api/data');var d=await r.json();render(d);$('sd').style.background='var(--g)'}catch(e){$('sd').style.background='var(--r)';$('ri').textContent='Connection error'}}
@@ -336,7 +337,7 @@ var pts=p.map(function(v,i){return(i/(p.length-1))*w+','+(h-((v-mn)/rg)*(h-6)-3)
 var fp='0,'+h+' '+pts+' '+w+','+h;var t=p[p.length-1]>=p[0],cl=t?'#00e59b':'#ff4757';
 var ly=h-((p[p.length-1]-mn)/rg)*(h-6)-3;
 c.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><defs><linearGradient id="sf" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+cl+'" stop-opacity=".15"/><stop offset="100%" stop-color="'+cl+'" stop-opacity="0"/></linearGradient></defs><polygon points="'+fp+'" fill="url(#sf)"/><polyline points="'+pts+'" fill="none" stroke="'+cl+'" stroke-width="1.5" stroke-linejoin="round"/><circle cx="'+w+'" cy="'+ly+'" r="2.5" fill="'+cl+'"/></svg>';}
-fd();setInterval(fd,60000);
+fd();setInterval(fd,60000);setInterval(syncTheme,15000);
 </script>
 </body>
 </html>
