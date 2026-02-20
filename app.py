@@ -466,13 +466,24 @@ def trigger_onedrive_download(filepath):
 
 def find_latest_hedge_file():
     # Scan OneDrive sync folder + local data dir
-    onedrive_dir = os.path.expanduser(
-        "~/Library/Group Containers/UBF8T346G9.OneDriveSyncClientSuite/"
-        "OneDrive - Geomet Recycle.noindex/OneDrive - Geomet Recycle/"
-        "Pricing_Hedge - Hedge Worksheet"
-    )
+    onedrive_dirs = [
+        os.path.expanduser(
+            "~/Library/CloudStorage/OneDrive-GeometRecycle/"
+            "Pricing_Hedge - Hedge Worksheet"
+        ),
+        # Legacy path (older OneDrive versions)
+        os.path.expanduser(
+            "~/Library/Group Containers/UBF8T346G9.OneDriveSyncClientSuite/"
+            "OneDrive - Geomet Recycle.noindex/OneDrive - Geomet Recycle/"
+            "Pricing_Hedge - Hedge Worksheet"
+        ),
+    ]
     files = glob.glob(str(DATA_DIR / "Hedge*.xlsx"))
-    files += glob.glob(os.path.join(onedrive_dir, "Hedge*.xlsx"))
+    for onedrive_dir in onedrive_dirs:
+        try:
+            files += glob.glob(os.path.join(onedrive_dir, "Hedge*.xlsx"))
+        except PermissionError:
+            print(f"[WARN] Permission denied: {onedrive_dir} — grant Full Disk Access to Python")
     if not files: return None
     def extract_date(f):
         base = os.path.basename(f)
