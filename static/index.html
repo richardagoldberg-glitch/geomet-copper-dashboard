@@ -28,7 +28,7 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .pl{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--td);margin-bottom:14px;display:flex;align-items:center;gap:6px}
 .pl::before{content:'';width:3px;height:10px;border-radius:1px}
 .pp .pl::before{background:var(--cu)}.tp .pl::before{background:var(--b)}.sp .pl::before{background:var(--y)}
-.gp .pl::before{background:var(--cu)}.posp .pl::before{background:var(--g)}.slp .pl::before{background:var(--p)}
+.gp .pl::before{background:var(--cu)}.posp .pl::before{background:var(--g)}.slp .pl::before{background:var(--p)}.sap .pl::before{background:var(--b)}
 .rp .pl::before{background:var(--r)}.dp .pl::before{background:var(--o)}.cp .pl::before{background:var(--p)}.fwp .pl::before{background:var(--g)}
 .pm{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
 .pv{font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:700;line-height:1;letter-spacing:-1px}
@@ -244,6 +244,36 @@ h+='<div class="cat-row chill"><span class="cat-label">Unpriced / Unshipped</spa
 h+='</div>';
 if(r.priced_sales_avg>0)h+='<div class="rs" style="margin-top:6px"><span class="rsl">Avg priced</span><span class="rsv">$'+r.priced_sales_avg.toFixed(4)+'</span></div>';
 }else h+='<div class="nd">No sales data</div>';
+h+='</div>';
+// Sales Position (supply vs demand)
+h+='<div class="pn sap"><div class="pl">Sales Position</div>';
+if(r&&r.total_inv_po>0){
+var sup=r.total_inv_po,dem=r.total_sales_lbs,mx=Math.max(sup,dem)||1;
+var supW=Math.round(sup/mx*100),demW=Math.round(dem/mx*100);
+var sd=r.surplus_deficit_lbs,sdCls=sd>=0?'pos':'neg',sdLbl=sd>=0?'Surplus':'Deficit';
+h+='<div style="margin-bottom:10px">';
+h+='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--tm)">Supply (Inv + POs)</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+n(Math.round(sup))+' lbs</span></div>';
+h+='<div class="rbg"><div class="rbf" style="width:'+supW+'%;background:var(--b)"></div></div>';
+h+='<div style="display:flex;justify-content:space-between;font-size:10px;margin:6px 0 3px"><span style="color:var(--tm)">Total Sales</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+n(Math.round(dem))+' lbs</span></div>';
+h+='<div class="rbg"><div class="rbf" style="width:'+demW+'%;background:var(--p)"></div></div>';
+h+='</div>';
+h+='<div class="rs"><span class="rsl">Coverage</span><span class="rsv">'+r.coverage_pct.toFixed(1)+'%</span></div>';
+h+='<div class="rs"><span class="rsl">'+sdLbl+'</span><span class="rsv '+sdCls+'">'+n(Math.abs(Math.round(sd)))+' lbs</span></div>';
+var ic=r.inv_by_commodity||{},sc=r.sales_by_commodity||{};
+var cats=['BB','#1','#2','Chops'];
+h+='<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">';
+h+='<div style="display:flex;font-size:9px;color:var(--tm);margin-bottom:4px;padding:0 2px"><span style="flex:1">Grade</span><span style="width:75px;text-align:right">Inv</span><span style="width:75px;text-align:right">Sales</span><span style="width:60px;text-align:right">Cov%</span></div>';
+for(var ci=0;ci<cats.length;ci++){var cat=cats[ci];
+var inv=ic[cat]||0,sal=sc[cat]||0,cov=sal>0?((inv/sal)*100):0;
+var covCls=cov>=80?'pos':cov>=40?'':'neg';
+h+='<div style="display:flex;font-size:10px;padding:3px 2px;align-items:center;border-bottom:1px solid var(--bd)">';
+h+='<span style="flex:1;font-weight:600">'+cat+'</span>';
+h+='<span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(inv))+'</span>';
+h+='<span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(sal))+'</span>';
+h+='<span class="'+covCls+'" style="width:60px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600">'+cov.toFixed(0)+'%</span>';
+h+='</div>';}
+h+='</div>';
+}else h+='<div class="nd">No supply data</div>';
 h+='</div>';
 // Risk
 h+='<div class="pn rp"><div class="pl">Risk</div>';

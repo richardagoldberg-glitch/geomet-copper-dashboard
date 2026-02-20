@@ -593,6 +593,8 @@ def read_hedge_spreadsheet(filepath):
             "updated": "", "source_file": os.path.basename(filepath),
             "sales_priced_unshipped": [], "sales_unpriced_shipped": [], "sales_unpriced_unshipped": [],
             "sales_priced_unshipped_lbs": 0, "sales_unpriced_shipped_lbs": 0, "sales_unpriced_unshipped_lbs": 0,
+            "inv_by_commodity": {"BB": 0, "#1": 0, "#2": 0, "Chops": 0},
+            "sales_by_commodity": {"BB": 0, "#1": 0, "#2": 0, "Chops": 0},
         }
 
         if "POSITION" in wb.sheetnames:
@@ -616,6 +618,19 @@ def read_hedge_spreadsheet(filepath):
                     if s == "PRICED SO OS" and j == 0:
                         try: result["priced_sales_lbs"] = float(row[1]) if row[1] else 0
                         except: pass
+            # Extract per-commodity inventory from solid inventory columns (col 2=item, col 5=CuUnits)
+            for row in grid[7:25]:
+                if len(row) > 5 and isinstance(row[2], str) and isinstance(row[5], (int, float)):
+                    item = row[2].strip().upper()
+                    cu = float(row[5])
+                    if item.startswith("CUBB"):
+                        result["inv_by_commodity"]["BB"] += cu
+                    elif item.startswith("CU1"):
+                        result["inv_by_commodity"]["#1"] += cu
+                    elif item.startswith("CU2"):
+                        result["inv_by_commodity"]["#2"] += cu
+                    elif item.startswith("CUCHOP"):
+                        result["inv_by_commodity"]["Chops"] += cu
 
         shipped_orders = {}
         if "O SOLID SALE" in wb.sheetnames:
@@ -666,6 +681,16 @@ def read_hedge_spreadsheet(filepath):
                         else:
                             result["sales_unpriced_unshipped"].append(sale)
                             result["sales_unpriced_unshipped_lbs"] += open_priced
+                    sale_lbs = priced_tons + open_priced
+                    cu = commodity.upper()
+                    if cu.startswith("CUBB") and "CHOP" not in cu:
+                        result["sales_by_commodity"]["BB"] += sale_lbs
+                    elif cu.startswith("CU1"):
+                        result["sales_by_commodity"]["#1"] += sale_lbs
+                    elif cu.startswith("CU2"):
+                        result["sales_by_commodity"]["#2"] += sale_lbs
+                    elif "CHOP" in cu:
+                        result["sales_by_commodity"]["Chops"] += sale_lbs
                 except (TypeError, ValueError, IndexError): continue
             if priced_total > 0: result["priced_sales_avg"] = round(priced_value / priced_total, 4)
             result["priced_sales_lbs"] = priced_total; result["unpriced_sales_lbs"] = unpriced_total
@@ -677,6 +702,10 @@ def read_hedge_spreadsheet(filepath):
                     label = str(row[0]).strip(); val = row[1] if len(row) > 1 else None
                     if label == "Total Inv/PO" and isinstance(val, (int, float)):
                         result["total_inv_po"] = float(val)
+                    if label == "Inventory Copper" and isinstance(val, (int, float)):
+                        result["inventory_cu_lbs"] = float(val)
+                    if label.startswith("PO Waiting") and isinstance(val, (int, float)):
+                        result["po_lbs"] = float(val)
 
         result["hedge_lbs"] = abs(result["comex_futures"]) + abs(result["lme_futures"])
         match = re.search(r'Hedge(\d{8})', os.path.basename(filepath))
@@ -987,6 +1016,14 @@ def calc_risk(pos, md):
         "sales_priced_unshipped_lbs": pos.get("sales_priced_unshipped_lbs", 0),
         "sales_unpriced_shipped_lbs": pos.get("sales_unpriced_shipped_lbs", 0),
         "sales_unpriced_unshipped_lbs": pos.get("sales_unpriced_unshipped_lbs", 0),
+        "total_inv_po": pos.get("total_inv_po", 0),
+        "inventory_cu_lbs": pos.get("inventory_cu_lbs", 0),
+        "po_lbs": pos.get("po_lbs", 0),
+        "total_sales_lbs": pos.get("priced_sales_lbs", 0) + pos.get("unpriced_sales_lbs", 0),
+        "coverage_pct": round((pos.get("total_inv_po", 0) / (pos.get("priced_sales_lbs", 0) + pos.get("unpriced_sales_lbs", 0))) * 100, 1) if (pos.get("priced_sales_lbs", 0) + pos.get("unpriced_sales_lbs", 0)) > 0 else 0,
+        "surplus_deficit_lbs": pos.get("total_inv_po", 0) - (pos.get("priced_sales_lbs", 0) + pos.get("unpriced_sales_lbs", 0)),
+        "inv_by_commodity": pos.get("inv_by_commodity", {}),
+        "sales_by_commodity": pos.get("sales_by_commodity", {}),
     }
 
 
