@@ -430,16 +430,89 @@ def calc_fix_window(md, sig):
 
 
 # ---------------------------------------------------------------------------
-# WAREHOUSE STOCKS
+# WAREHOUSE STOCKS — CME scraper with 24h cache
 # ---------------------------------------------------------------------------
+SHORT_TON_TO_MT = 0.907185
+_cme_wh_cache = {"data": None, "timestamp": 0}
+
+def fetch_cme_warehouse():
+    """Download and parse CME Copper_Stocks.xls for live warehouse data."""
+    global _cme_wh_cache
+    now = time.time()
+    if _cme_wh_cache["data"] and (now - _cme_wh_cache["timestamp"]) < 86400:
+        return _cme_wh_cache["data"]
+
+    try:
+        import urllib.request, tempfile, xlrd
+        url = "https://www.cmegroup.com/delivery_reports/Copper_Stocks.xls"
+        req = urllib.request.Request(url, headers={"User-Agent": "GeometDashboard/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            xls_data = resp.read()
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".xls", delete=False)
+        tmp.write(xls_data); tmp.close()
+
+        wb = xlrd.open_workbook(tmp.name)
+        ws = wb.sheet_by_index(0)
+
+        # Extract activity date from row 8 (e.g. "Activity Date: 2/18/2026")
+        activity_date = ""
+        for r in range(min(10, ws.nrows)):
+            val = str(ws.cell_value(r, 6)).strip()
+            if "Activity Date" in val:
+                activity_date = val.replace("Activity Date:", "").strip()
+                break
+
+        # Find TOTAL COPPER row for totals
+        total_today_st = 0; prev_total_st = 0
+        for r in range(ws.nrows):
+            label = str(ws.cell_value(r, 0)).strip()
+            if label == "TOTAL COPPER":
+                prev_total_st = float(ws.cell_value(r, 2)) if ws.cell_value(r, 2) else 0
+                total_today_st = float(ws.cell_value(r, 7)) if ws.cell_value(r, 7) else 0
+                break
+
+        os.unlink(tmp.name)
+
+        if total_today_st <= 0:
+            return None
+
+        total_mt = int(round(total_today_st * SHORT_TON_TO_MT))
+        prev_mt = int(round(prev_total_st * SHORT_TON_TO_MT))
+        net_change_mt = total_mt - prev_mt
+        if net_change_mt > 0:
+            trend = "building"
+        elif net_change_mt < 0:
+            trend = "drawing"
+        else:
+            trend = "stable"
+
+        result = {
+            "mt": total_mt, "lbs": int(total_mt * MT_TO_LB),
+            "date": activity_date, "trend": trend,
+            "short_tons": int(total_today_st),
+            "net_change_mt": net_change_mt,
+            "source": "cme",
+        }
+        _cme_wh_cache = {"data": result, "timestamp": now}
+        print(f"[INFO] CME warehouse: {total_mt:,} MT ({trend}, {activity_date})")
+        return result
+    except Exception as e:
+        print(f"[WARN] CME warehouse scrape error: {e}")
+        return None
+
 def get_warehouse_data():
+    # Try live CME data first, fall back to static config
+    live = fetch_cme_warehouse()
+    if live:
+        return live
     wh = CFG.get("COMEX_WAREHOUSE_MT", 0)
     if not wh: return None
     return {
-        "mt": wh,
-        "lbs": int(wh * MT_TO_LB),
+        "mt": wh, "lbs": int(wh * MT_TO_LB),
         "date": CFG.get("COMEX_WAREHOUSE_DATE", ""),
         "trend": CFG.get("COMEX_WAREHOUSE_TREND", ""),
+        "source": "config",
     }
 
 
@@ -621,39 +694,90 @@ def read_hedge_spreadsheet(filepath):
 # ---------------------------------------------------------------------------
 # COMEX MARKET DATA + PRICE CONTEXT
 # ---------------------------------------------------------------------------
-def fetch_copper_data():
-    try:
-        import yfinance as yf
-        ticker = yf.Ticker("HG=F")
-        hist = ticker.history(period="1y", interval="1d")
-        if hist.empty: return None
-        hist = hist.reset_index()
-        hist.columns = [c if isinstance(c, str) else c[0] for c in hist.columns]
+_copper_cache = {"data": None, "timestamp": 0}
+COPPER_CACHE_TTL = 300  # 5 minutes
 
-        latest = hist.iloc[-1]; prev = hist.iloc[-2] if len(hist) > 1 else latest
-        price = float(latest["Close"]); prev_close = float(prev["Close"])
+def _fetch_ohlc_investiny():
+    """Fetch ~1 year COMEX copper OHLC from investing.com via investiny."""
+    from investiny import historical_data
+    now = datetime.now()
+    one_year_ago = now - timedelta(days=365)
+    data = historical_data(
+        investing_id=8831,
+        from_date=one_year_ago.strftime("%m/%d/%Y"),
+        to_date=now.strftime("%m/%d/%Y"),
+    )
+    if not data or not data.get("close") or len(data["close"]) < 20:
+        return None
+    n = len(data["close"])
+    dates = [datetime.strptime(d, "%m/%d/%Y") for d in data["date"]]
+    closes = [float(c) for c in data["close"]]
+    highs = [float(h) for h in data["high"]]
+    lows = [float(lo) for lo in data["low"]]
+    print(f"[INFO] Copper from investing.com ({n} days)")
+    return {"dates": dates, "closes": closes, "highs": highs, "lows": lows, "volumes": None, "source": "investing.com"}
+
+def _fetch_ohlc_yfinance():
+    """Fallback: fetch COMEX copper OHLCV from yfinance."""
+    import yfinance as yf
+    ticker = yf.Ticker("HG=F")
+    hist = ticker.history(period="1y", interval="1d")
+    if hist.empty:
+        return None
+    hist = hist.reset_index()
+    hist.columns = [c if isinstance(c, str) else c[0] for c in hist.columns]
+    dates = [r["Date"].to_pydatetime() if hasattr(r["Date"], "to_pydatetime") else r["Date"] for _, r in hist.iterrows()]
+    closes = hist["Close"].astype(float).tolist()
+    highs = hist["High"].astype(float).tolist()
+    lows = hist["Low"].astype(float).tolist()
+    volumes = hist["Volume"].astype(float).tolist()
+    print(f"[INFO] Copper from yfinance ({len(closes)} days)")
+    return {"dates": dates, "closes": closes, "highs": highs, "lows": lows, "volumes": volumes, "source": "yfinance"}
+
+def fetch_copper_data():
+    global _copper_cache
+    now = time.time()
+    if _copper_cache["data"] and (now - _copper_cache["timestamp"]) < COPPER_CACHE_TTL:
+        return _copper_cache["data"]
+
+    try:
+        # Try investing.com first, fall back to yfinance
+        ohlc = None
+        try:
+            ohlc = _fetch_ohlc_investiny()
+        except Exception as e:
+            print(f"[WARN] investiny error: {e}")
+        if not ohlc:
+            ohlc = _fetch_ohlc_yfinance()
+        if not ohlc:
+            return None
+
+        dates = ohlc["dates"]; closes = ohlc["closes"]; highs = ohlc["highs"]; lows = ohlc["lows"]
+        copper_source = ohlc["source"]
+        n_closes = len(closes)
+
+        price = closes[-1]; prev_close = closes[-2] if n_closes > 1 else price
         change = price - prev_close
         change_pct = (change / prev_close) * 100 if prev_close else 0
-
-        closes = hist["Close"].astype(float).tolist()
-        highs = hist["High"].astype(float).tolist()
-        lows = hist["Low"].astype(float).tolist()
-        n_closes = len(closes)
 
         ma50 = sum(closes[-50:]) / min(n_closes, 50)
         ma100 = sum(closes[-100:]) / min(n_closes, 100)
         ma200 = sum(closes[-200:]) / min(n_closes, 200)
 
-        volumes = hist["Volume"].astype(float).tolist()
-        avg_vol = sum(volumes[-20:]) / min(len(volumes), 20) if volumes else 0
-        vol = float(latest["Volume"]) if "Volume" in latest else 0
-        vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+        # Volume (only available from yfinance)
+        volumes = ohlc.get("volumes")
+        if volumes:
+            avg_vol = sum(volumes[-20:]) / min(len(volumes), 20)
+            vol = volumes[-1]
+            vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+        else:
+            vol_ratio = 1.0
 
         recent = closes[-5:] if n_closes >= 5 else closes
-        spark = [{"date": r["Date"].strftime("%Y-%m-%d") if hasattr(r["Date"], "strftime") else str(r["Date"])[:10],
-                  "close": round(float(r["Close"]), 4)} for _, r in hist.tail(30).iterrows()]
+        spark = [{"date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10],
+                  "close": round(c, 4)} for d, c in zip(dates[-30:], closes[-30:])]
 
-        today_high = float(latest["High"]); today_low = float(latest["Low"])
+        today_high = highs[-1]; today_low = lows[-1]
         today_range = today_high - today_low
 
         c30 = closes[-30:] if n_closes >= 30 else closes
@@ -698,12 +822,12 @@ def fetch_copper_data():
         fed = fetch_fed_data()
         warehouse = get_warehouse_data()
 
-        return {
+        result = {
             "price": round(price, 4), "prev_close": round(prev_close, 4),
             "change": round(change, 4), "change_pct": round(change_pct, 2),
             "ma50": round(ma50, 4), "ma100": round(ma100, 4), "ma200": round(ma200, 4),
             "vol_ratio": round(vol_ratio, 2), "recent_closes": [round(c, 4) for c in recent],
-            "sparkline": spark,
+            "sparkline": spark, "copper_source": copper_source,
             "lme_price_lb": lme_price, "lme_price_mt": lme_mt, "lme_source": lme_source,
             "comex_lme_spread": spread, "comex_lme_spread_pct": spread_pct, "spread_intel": spread_intel,
             "today_high": round(today_high, 4), "today_low": round(today_low, 4),
@@ -717,6 +841,8 @@ def fetch_copper_data():
             "fed": fed, "warehouse": warehouse,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+        _copper_cache = {"data": result, "timestamp": time.time()}
+        return result
     except Exception as e:
         print(f"[ERROR] fetch_copper: {e}")
         import traceback; traceback.print_exc()
