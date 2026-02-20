@@ -631,6 +631,11 @@ def read_hedge_spreadsheet(filepath):
                         result["inv_by_commodity"]["#2"] += cu
                     elif item.startswith("CUCHOP"):
                         result["inv_by_commodity"]["Chops"] += cu
+            # Add ICW inventory (at projected recovery) to Chops — insulated wire becomes chops when processed
+            for i, row in enumerate(grid):
+                for j, cell in enumerate(row):
+                    if str(cell).strip() == "ICW INV" and j + 1 < len(row) and isinstance(row[j + 1], (int, float)):
+                        result["inv_by_commodity"]["Chops"] += float(row[j + 1])
 
         shipped_orders = {}
         if "O SOLID SALE" in wb.sheetnames:
