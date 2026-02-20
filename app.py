@@ -604,7 +604,7 @@ def read_hedge_spreadsheet(filepath):
                 for j, cell in enumerate(row):
                     s = str(cell).strip()
                     if i == 0 and j == 1 and isinstance(cell, (int, float)): result["net_lbs"] = float(cell)
-                    if i == 0 and j == 2 and isinstance(cell, (int, float)): result["avg_cost"] = float(cell)
+                    # avg_cost calculated below from per-commodity costs
                     if s == "COMEX FUTURES":
                         try:
                             v = row[1] if j == 0 else (grid[i][j+1] if j+1<len(row) else 0)
@@ -618,12 +618,23 @@ def read_hedge_spreadsheet(filepath):
                     if s == "PRICED SO OS" and j == 0:
                         try: result["priced_sales_lbs"] = float(row[1]) if row[1] else 0
                         except: pass
-            # Extract per-commodity inventory from solid inventory columns (col 2=item, col 5=CuUnits)
+            # Per-commodity avg costs from Power BI (until Jorge adds cost column to spreadsheet)
+            _COST_PER_LB = {
+                "CU1": 5.280171, "CU2": 5.134602, "CU2DIRTY": 5.134602, "CUBB": 5.455980,
+                "CAT5": 2.024765, "CUINS1": 3.041050, "CUINS2": 2.093361,
+                "MCM": 4.199354, "THHN": 3.914800, "WAVEOPENCU": 2.355245,
+                "CUCHOP CUBB": 4.616107, "CUCHOP1A_M": 4.616107, "CUCHOPS2": 4.616107,
+            }
+            total_cost = 0; total_cu_lbs = 0
+            # Extract per-commodity inventory from solid inventory columns (col 2=item, col 3=weight, col 5=CuUnits)
             for row in grid[7:25]:
                 if len(row) > 5 and isinstance(row[2], str) and isinstance(row[5], (int, float)):
                     item = row[2].strip().upper()
                     cu = float(row[5])
-                    if item.startswith("CUBB"):
+                    wt = float(row[3]) if isinstance(row[3], (int, float)) else cu
+                    if item in _COST_PER_LB:
+                        total_cost += wt * _COST_PER_LB[item]; total_cu_lbs += cu
+                    if item.startswith("CUBB") and "CHOP" not in item:
                         result["inv_by_commodity"]["BB"] += cu
                     elif item.startswith("CU1"):
                         result["inv_by_commodity"]["#1"] += cu
@@ -632,6 +643,7 @@ def read_hedge_spreadsheet(filepath):
                     elif item.startswith("CUCHOP"):
                         result["inv_by_commodity"]["Chops"] += cu
             # Add ICW inventory (at projected recovery) to Chops — insulated wire becomes chops when processed
+            # Also include ICW in weighted avg cost
             for i, row in enumerate(grid):
                 for j, cell in enumerate(row):
                     if str(cell).strip() == "ICW INV" and j + 1 < len(row) and isinstance(row[j + 1], (int, float)):
@@ -639,6 +651,16 @@ def read_hedge_spreadsheet(filepath):
                         result["inv_by_commodity"]["Chops"] += icw_cu
                         result["icw_cu_lbs"] = icw_cu
                         result["chops_solid_lbs"] = result["inv_by_commodity"]["Chops"] - icw_cu
+            # ICW per-item costs (col 9=item, col 10=weight, col 12=CuUnits)
+            for row in grid[7:25]:
+                if len(row) > 12 and isinstance(row[9], str) and isinstance(row[10], (int, float)):
+                    item = row[9].strip().upper()
+                    wt = float(row[10])
+                    cu = float(row[12]) if isinstance(row[12], (int, float)) else 0
+                    if item in _COST_PER_LB:
+                        total_cost += wt * _COST_PER_LB[item]; total_cu_lbs += cu
+            # Avg cost per lb of recovered copper (total $ paid / total Cu lbs out)
+            result["avg_cost"] = round(total_cost / total_cu_lbs, 6) if total_cu_lbs > 0 else 0
 
         shipped_orders = {}
         if "O SOLID SALE" in wb.sheetnames:
