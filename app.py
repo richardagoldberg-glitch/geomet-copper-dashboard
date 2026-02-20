@@ -4,10 +4,11 @@ Geomet Recycling - Copper Intelligence Dashboard v4.1
 Fix Window, Fed Funds, Warehouse Stocks, Price Context, DXY, S/R
 """
 
-import json, os, csv, glob, re, time
+import json, os, csv, glob, re, time, hashlib, secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.cookies import SimpleCookie
 import socketserver
 
 # Load .env file into environment before config
@@ -1223,6 +1224,57 @@ def load_position():
     return None
 
 
+# ---------------------------------------------------------------------------
+# AUTH — simple session-based login
+# ---------------------------------------------------------------------------
+_USERS = {
+    "richard": hashlib.sha256(b"geomet").hexdigest(),
+    "jorge": hashlib.sha256(b"geomet").hexdigest(),
+}
+_sessions = {}  # token -> {"user": ..., "created": timestamp}
+SESSION_MAX_AGE = 86400 * 7  # 7 days
+
+def _check_session(cookie_header):
+    if not cookie_header: return None
+    c = SimpleCookie()
+    c.load(cookie_header)
+    if "session" not in c: return None
+    token = c["session"].value
+    s = _sessions.get(token)
+    if s and (time.time() - s["created"]) < SESSION_MAX_AGE:
+        return s["user"]
+    _sessions.pop(token, None)
+    return None
+
+def _create_session(user):
+    token = secrets.token_hex(32)
+    _sessions[token] = {"user": user, "created": time.time()}
+    return token
+
+LOGIN_PAGE = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geomet — Login</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'IBM Plex Sans',sans-serif;background:#0a0e14;color:#e0e6ed;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.box{background:#111820;border:1px solid #1e2a3a;border-radius:8px;padding:40px;width:320px}
+.logo{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:3px;color:#d4845a;padding:4px 8px;border:1.5px solid #d4845a;border-radius:3px;display:inline-block;margin-bottom:20px}
+h2{font-size:14px;font-weight:300;color:#6b7f99;margin-bottom:20px}
+input{width:100%;padding:10px 12px;margin-bottom:12px;background:#1a2230;border:1px solid #1e2a3a;border-radius:4px;color:#e0e6ed;font-family:'IBM Plex Sans',sans-serif;font-size:13px}
+input:focus{outline:none;border-color:#d4845a}
+button{width:100%;padding:10px;background:rgba(212,132,90,.15);border:1px solid #d4845a;border-radius:4px;color:#d4845a;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;letter-spacing:1px;cursor:pointer}
+button:hover{background:rgba(212,132,90,.25)}
+.err{color:#ff4757;font-size:11px;margin-bottom:10px;display:none}
+</style></head><body>
+<div class="box"><div class="logo">GEOMET</div><h2>Copper Intelligence Dashboard</h2>
+<div class="err" id="err">Invalid username or password</div>
+<form method="POST" action="/login">
+<input name="user" placeholder="Username" autocomplete="username" required>
+<input name="pass" type="password" placeholder="Password" autocomplete="current-password" required>
+<button type="submit">LOGIN</button></form></div>
+<script>if(location.search.includes('err=1'))document.getElementById('err').style.display='block'</script>
+</body></html>"""
+
 THEME_FILE = DATA_DIR / "theme.json"
 
 def get_theme():
@@ -1238,7 +1290,24 @@ def set_theme(theme):
     except: pass
 
 class Handler(SimpleHTTPRequestHandler):
+    def _authed(self):
+        return _check_session(self.headers.get("Cookie"))
+
     def do_GET(self):
+        if self.path == "/login":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html"); self.end_headers()
+            self.wfile.write(LOGIN_PAGE.encode()); return
+        if self.path == "/logout":
+            c = SimpleCookie()
+            c.load(self.headers.get("Cookie") or "")
+            if "session" in c: _sessions.pop(c["session"].value, None)
+            self.send_response(302)
+            self.send_header("Set-Cookie", "session=; Path=/; Max-Age=0")
+            self.send_header("Location", "/login"); self.end_headers(); return
+        if not self._authed():
+            self.send_response(302)
+            self.send_header("Location", "/login"); self.end_headers(); return
         if self.path == "/api/theme":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -1280,6 +1349,27 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(fp.read_bytes())
         else: self.send_error(404)
     def do_POST(self):
+        if self.path == "/login":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode()
+            from urllib.parse import parse_qs
+            params = parse_qs(body)
+            user = params.get("user", [""])[0].strip().lower()
+            pwd = params.get("pass", [""])[0]
+            pwd_hash = hashlib.sha256(pwd.encode()).hexdigest()
+            if user in _USERS and _USERS[user] == pwd_hash:
+                token = _create_session(user)
+                self.send_response(302)
+                self.send_header("Set-Cookie", f"session={token}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Lax")
+                self.send_header("Location", "/"); self.end_headers()
+            else:
+                self.send_response(302)
+                self.send_header("Location", "/login?err=1"); self.end_headers()
+            return
+        if not self._authed():
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(b'{"error":"unauthorized"}'); return
         if self.path == "/api/theme":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
