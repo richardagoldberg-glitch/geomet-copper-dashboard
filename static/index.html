@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geomet — Copper Intelligence</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+:root{--bg:#0a0e14;--sf:#111820;--sf2:#1a2230;--bd:#1e2a3a;--tx:#e0e6ed;--tm:#6b7f99;--td:#3d4f63;
+--g:#00e59b;--gd:rgba(0,229,155,.12);--r:#ff4757;--rd:rgba(255,71,87,.12);
+--y:#ffc048;--yd:rgba(255,192,72,.12);--o:#ff8c42;--od:rgba(255,140,66,.12);
+--b:#4a9eff;--bdd:rgba(74,158,255,.12);--cu:#d4845a;--cg:rgba(212,132,90,.15);
+--p:#a78bfa;--pd:rgba(167,139,250,.12)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--bd);background:linear-gradient(180deg,rgba(212,132,90,.06) 0%,transparent 100%)}
+.hdr-l{display:flex;align-items:center;gap:12px}
+.logo{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:3px;color:var(--cu);padding:4px 8px;border:1.5px solid var(--cu);border-radius:3px}
+.hdr-t{font-size:13px;font-weight:300;color:var(--tm)}
+.hdr-r{display:flex;align-items:center;gap:14px}
+.ri{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--td)}
+.sd{width:7px;height:7px;border-radius:50%;background:var(--g);animation:p 2s infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.4}}
+.ch-badge{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;padding:3px 7px;border-radius:3px;letter-spacing:0.5px}
+.ch-badge.open{background:var(--gd);color:var(--g)}.ch-badge.closed{background:var(--rd);color:var(--r)}.ch-badge.warn{background:var(--yd);color:var(--y)}
+.db{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--bd);margin:1px}
+.pn{background:var(--sf);padding:20px 22px}
+.pl{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--td);margin-bottom:14px;display:flex;align-items:center;gap:6px}
+.pl::before{content:'';width:3px;height:10px;border-radius:1px}
+.pp .pl::before{background:var(--cu)}.tp .pl::before{background:var(--b)}.sp .pl::before{background:var(--y)}
+.gp .pl::before{background:var(--cu)}.posp .pl::before{background:var(--g)}.slp .pl::before{background:var(--p)}
+.rp .pl::before{background:var(--r)}.dp .pl::before{background:var(--o)}.cp .pl::before{background:var(--p)}.fwp .pl::before{background:var(--g)}
+.pm{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
+.pv{font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:700;line-height:1;letter-spacing:-1px}
+.pu{font-size:11px;color:var(--td)}
+.pc{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;padding:3px 7px;border-radius:3px}
+.pc.up{color:var(--g);background:var(--gd)}.pc.dn{color:var(--r);background:var(--rd)}
+.ps{font-size:11px;color:var(--td);margin-top:2px}
+.lr{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--sf2);border-radius:4px;margin-top:8px}
+.ll{font-size:10px;color:var(--tm)}.lv{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
+.sc{margin-top:10px;height:45px}.sc svg{width:100%;height:100%}
+.mg{display:grid;gap:7px}
+.mr{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid transparent}
+.mr.a{border-left-color:var(--g)}.mr.bl{border-left-color:var(--r)}
+.ml{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--tm)}
+.mv{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600}
+.ms{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1px}
+.ms.a{color:var(--g)}.ms.bl{color:var(--r)}
+.mt{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--td);padding:4px 7px;background:var(--sf2);border-radius:3px;display:inline-block}
+.sb{display:inline-flex;padding:8px 14px;border-radius:5px;font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;letter-spacing:1px;margin-bottom:10px}
+.sb.green{background:var(--gd);color:var(--g);border:1px solid rgba(0,229,155,.25)}
+.sb.red{background:var(--rd);color:var(--r);border:1px solid rgba(255,71,87,.25)}
+.sb.yellow{background:var(--yd);color:var(--y);border:1px solid rgba(255,192,72,.25)}
+.sb.orange{background:var(--od);color:var(--o);border:1px solid rgba(255,140,66,.25)}
+.sb.blue{background:var(--bdd);color:var(--b);border:1px solid rgba(74,158,255,.25)}
+.sdt{font-size:12px;color:var(--tm);line-height:1.4}
+.pg{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.pk{padding:9px 10px;background:var(--sf2);border-radius:4px}
+.pkl{font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
+.pkv{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700}
+.pkv.pos{color:var(--g)}.pkv.neg{color:var(--r)}
+.pks{font-size:9px;color:var(--td);margin-top:2px}
+.rs{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bd)}.rs:last-child{border-bottom:none}
+.rsl{font-size:11px;color:var(--tm)}.rsv{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
+.rbg{height:5px;background:var(--sf2);border-radius:3px;overflow:hidden;margin-top:5px}.rbf{height:100%;border-radius:3px}
+.sbar{display:flex;height:18px;border-radius:3px;overflow:hidden;margin:6px 0}.sbp{background:var(--g)}.sbu{background:var(--p)}
+.slg{display:flex;gap:10px;margin-top:4px;margin-bottom:10px}
+.sli{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--tm)}
+.sld{width:6px;height:6px;border-radius:2px}
+.dl{display:grid;gap:7px}
+.di{padding:9px 10px;background:var(--sf2);border-radius:4px;font-size:12px;line-height:1.4;border-left:3px solid var(--cu)}
+.di.warn{border-left-color:var(--r);background:rgba(255,71,87,.06)}
+.di.fix-good{border-left-color:var(--g);background:rgba(0,229,155,.06)}
+.di.fix-bad{border-left-color:var(--r);background:rgba(255,71,87,.06)}
+.gi{padding:8px 10px;background:var(--sf2);border-radius:4px;margin-bottom:6px;border-left:3px solid transparent}
+.gi.high{border-left-color:var(--g)}.gi.medium{border-left-color:var(--y)}.gi.low{border-left-color:var(--td)}
+.ga{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:1px;margin-bottom:3px}
+.ga.high{color:var(--g)}.ga.medium{color:var(--y)}.ga.low{color:var(--tm)}
+.gd{font-size:11px;color:var(--tm);line-height:1.3}
+.tl{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(0,229,155,.06);border:1px dashed rgba(0,229,155,.3);border-radius:4px;margin-bottom:10px}
+.tll{font-size:10px;color:var(--g)}.tlv{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--g)}
+.nd{color:var(--td);font-style:italic;font-size:11px;padding:12px 0}
+.ld{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--td)}
+.ls{width:16px;height:16px;border:2px solid var(--bd);border-top-color:var(--cu);border-radius:50%;animation:sp .8s linear infinite;margin-right:8px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.s2{grid-column:span 2}
+.cat-row{display:flex;justify-content:space-between;padding:6px 10px;background:var(--sf2);border-radius:4px;margin-bottom:4px;border-left:3px solid transparent}
+.cat-row.hot{border-left-color:var(--r);background:rgba(255,71,87,.06)}.cat-row.ok{border-left-color:var(--g)}.cat-row.chill{border-left-color:var(--td)}
+.cat-label{font-size:10px;color:var(--tm)}.cat-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600}
+.cat-val.hot{color:var(--r)}.cat-val.ok{color:var(--g)}.cat-val.chill{color:var(--tm)}
+.arb-box{padding:10px;background:var(--sf2);border-radius:5px;border-left:3px solid var(--b);margin-top:10px}
+.arb-dir{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:var(--b);margin-bottom:4px}
+.arb-msg{font-size:11px;color:var(--tm);line-height:1.3}
+.ctx-row{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--sf2);border-radius:4px;margin-bottom:5px}
+.ctx-l{font-size:10px;color:var(--tm)}.ctx-v{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600}
+.rng-bar{height:8px;background:var(--sf2);border-radius:4px;position:relative;margin:6px 0}
+.rng-fill{position:absolute;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--r),var(--y),var(--g));opacity:.3}
+.rng-dot{position:absolute;top:-2px;width:4px;height:12px;background:var(--tx);border-radius:2px;transform:translateX(-50%)}
+.rng-labels{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--td)}
+.roc-row{display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--sf2);border-radius:4px;margin-bottom:4px}
+.roc-label{font-size:9px;color:var(--td);width:28px}
+.roc-bar-wrap{flex:1;height:6px;background:var(--bd);border-radius:3px;position:relative;overflow:visible}
+.roc-bar{height:100%;border-radius:3px;position:absolute;top:0}
+.roc-val{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;width:70px;text-align:right}
+.streak-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;margin-top:6px}
+.streak-badge.up{background:var(--gd);color:var(--g)}.streak-badge.down{background:var(--rd);color:var(--r)}
+.sr-row{display:flex;justify-content:space-between;padding:5px 10px;background:var(--sf2);border-radius:4px;margin-bottom:4px;border-left:3px solid transparent}
+.sr-row.sup{border-left-color:var(--g)}.sr-row.res{border-left-color:var(--r)}
+.sr-level{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600}
+.sr-dist{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--td)}
+.dxy-box{padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;display:flex;justify-content:space-between;align-items:center}
+.dxy-label{font-size:10px;color:var(--tm)}.dxy-val{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
+.dxy-chg{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;padding:2px 5px;border-radius:3px}
+.fw-meter{padding:12px;background:var(--sf2);border-radius:6px;margin-bottom:12px}
+.fw-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.fw-label{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:1px}
+.fw-score{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700}
+.fw-bar{height:8px;background:var(--bd);border-radius:4px;overflow:hidden;margin-bottom:6px}
+.fw-fill{height:100%;border-radius:4px;transition:width .5s}
+.fw-factors{display:flex;flex-wrap:wrap;gap:4px}
+.fw-tag{font-size:9px;padding:2px 6px;border-radius:3px;background:var(--sf);color:var(--tm);border:1px solid var(--bd)}
+@media(max-width:1400px){.db{grid-template-columns:1fr 1fr 1fr}.s2{grid-column:span 1}}
+@media(max-width:1000px){.db{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.db{grid-template-columns:1fr}.pv{font-size:28px}}
+</style>
+</head>
+<body>
+<div class="hdr"><div class="hdr-l"><div class="logo">GEOMET</div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
+<div class="hdr-r"><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><div class="sd" id="sd"></div></div></div>
+<div class="db" id="db"><div class="ld"><div class="ls"></div>Fetching copper data...</div></div>
+<script>
+function n(v){return v?Number(v).toLocaleString():'0'}
+function $(id){return document.getElementById(id)}
+async function fd(){try{var r=await fetch('/api/data');var d=await r.json();render(d);$('sd').style.background='var(--g)'}catch(e){$('sd').style.background='var(--r)';$('ri').textContent='Connection error'}}
+function render(d){
+var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=d.gtc_suggestions||[],cfg=d.config||{},fw=d.fix_window;
+$('ri').textContent='Updated '+d.last_refresh;
+if(pos&&pos.source_file)$('si').textContent='Source: '+pos.source_file;
+if(m&&m.china){var ch=m.china,chc=ch.status==='OPEN'?'open':ch.thin_liquidity?'warn':'closed';
+$('ch').className='ch-badge '+chc;$('ch').textContent=ch.status==='OPEN'?'SHFE OPEN':ch.detail;}
+if(!m||!s){$('db').innerHTML='<div class="ld">Unable to fetch data.</div>';return}
+var cc=m.change>=0?'up':'dn',cs=m.change>=0?'+':'',h='';
+// Price + LME + DXY + Fed + Warehouse
+h+='<div class="pn pp"><div class="pl">COMEX Copper (HG)</div><div class="pm"><div class="pv">'+m.price.toFixed(4)+'</div><div class="pu">$/lb</div>';
+h+='<div class="pc '+cc+'">'+cs+m.change.toFixed(4)+' ('+cs+m.change_pct.toFixed(2)+'%)</div></div>';
+h+='<div class="ps">Prev settle: '+m.prev_close.toFixed(4)+'</div>';
+if(m.lme_price_lb){
+h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+m.lme_price_lb.toFixed(4)+'/lb</span></div>';
+if(m.lme_price_mt)h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+n(Math.round(m.lme_price_mt))+'/MT</span></div>';
+if(m.comex_lme_spread!==null&&m.comex_lme_spread!==undefined){var spc=m.comex_lme_spread>=0?'var(--g)':'var(--b)';
+h+='<div class="lr"><span class="ll">COMEX-LME Spread</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb</span></div>';}
+h+='<div style="text-align:right;font-size:8px;color:var(--td);margin-top:3px">via '+m.lme_source+'</div>';
+}else{h+='<div class="lr"><span class="ll">LME</span><span style="font-size:9px;color:var(--r)">Not configured</span></div>';}
+if(m.dxy&&m.dxy.price){var dx=m.dxy,dcl=dx.change>=0?'var(--r)':'var(--g)';
+h+='<div class="dxy-box"><span class="dxy-label">DXY</span><span class="dxy-val">'+dx.price.toFixed(2)+'</span>';
+h+='<span class="dxy-chg" style="color:'+dcl+';background:'+(dx.change>=0?'var(--rd)':'var(--gd)')+'">'+(dx.change>=0?'+':'')+dx.change.toFixed(2)+'</span></div>';}
+// Fed
+if(m.fed){var fed=m.fed;
+if(fed.first_cut&&fed.first_cut!=='None priced'){h+='<div class="lr"><span class="ll">Fed Cuts</span><span class="lv">'+fed.total_cuts_2026+'x by Dec \u2014 first '+fed.first_cut+'</span></div>';}
+else if(fed.yield_10y){h+='<div class="lr"><span class="ll">10Y Yield</span><span class="lv">'+fed.yield_10y+'%</span></div>';}
+h+='<div class="lr"><span class="ll">Fed Rate</span><span class="lv">'+fed.current_rate+'%</span></div>';}
+// Warehouse
+if(m.warehouse&&m.warehouse.mt){var wh=m.warehouse,wa=wh.trend==='building'?'\u2191 Building':wh.trend==='drawing'?'\u2193 Drawing':'\u2192 Stable';
+var wc=wh.trend==='building'?'var(--r)':wh.trend==='drawing'?'var(--g)':'var(--tm)';
+h+='<div class="lr"><span class="ll">COMEX Warehouse</span><span class="lv" style="color:'+wc+'">'+n(wh.mt)+' MT '+wa+'</span></div>';
+h+='<div style="text-align:right;font-size:8px;color:var(--td)">as of '+wh.date+'</div>';}
+h+='<div class="sc" id="sk"></div></div>';
+// Trend + S/R
+h+='<div class="pn tp"><div class="pl">Trend</div><div class="mg">';
+[['50 DMA',m.ma50,s.above_50],['100 DMA',m.ma100,s.above_100],['200 DMA',m.ma200,s.above_200]].forEach(function(x){
+h+='<div class="mr '+(x[2]?'a':'bl')+'"><span class="ml">'+x[0]+'</span><span class="mv">'+x[1].toFixed(4)+'</span><span class="ms '+(x[2]?'a':'bl')+'">'+(x[2]?'ABOVE':'BELOW')+'</span></div>';});
+h+='</div><div style="margin-top:10px"><div class="mt">'+s.trend+' ('+s.trend_strength+')</div> <div class="mt" style="margin-left:3px">'+s.move_type+'</div></div>';
+if(m.support_resistance){var sr=m.support_resistance;
+if((sr.resistance&&sr.resistance.length)||(sr.support&&sr.support.length)){
+h+='<div style="margin-top:10px"><div style="font-size:9px;color:var(--td);margin-bottom:5px;text-transform:uppercase;letter-spacing:1px">Key Levels</div>';
+if(sr.resistance)sr.resistance.slice().reverse().forEach(function(r){h+='<div class="sr-row res"><span class="sr-level" style="color:var(--r)">'+r.level.toFixed(2)+' R</span><span class="sr-dist">'+(r.distance*100).toFixed(0)+'c above</span></div>';});
+h+='<div class="sr-row" style="border-left-color:var(--cu);background:var(--cg)"><span class="sr-level" style="color:var(--cu)">'+m.price.toFixed(2)+' \u2190 NOW</span><span class="sr-dist"></span></div>';
+if(sr.support)sr.support.forEach(function(s){h+='<div class="sr-row sup"><span class="sr-level" style="color:var(--g)">'+s.level.toFixed(2)+' S</span><span class="sr-dist">'+(s.distance*100).toFixed(0)+'c below</span></div>';});
+h+='</div>';}}
+h+='</div>';
+// Signal + Fix Window
+h+='<div class="pn sp"><div class="pl">Signal</div>';
+// Fix Window Meter
+if(fw){var fwc=fw.color==='green'?'var(--g)':fw.color==='red'?'var(--r)':fw.color==='orange'?'var(--o)':'var(--y)';
+h+='<div class="fw-meter"><div class="fw-header"><span class="fw-label" style="color:'+fwc+'">FIX WINDOW</span><span class="fw-score" style="color:'+fwc+'">'+fw.score+'</span></div>';
+h+='<div class="fw-bar"><div class="fw-fill" style="width:'+fw.score+'%;background:'+fwc+'"></div></div>';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+fwc+';margin-bottom:4px">'+fw.label+'</div>';
+if(fw.factors&&fw.factors.length){h+='<div class="fw-factors">';fw.factors.forEach(function(f){h+='<span class="fw-tag">'+f+'</span>';});h+='</div>';}
+h+='</div>';}
+h+='<div class="sb '+s.signal_color+'">'+s.signal+'</div>';
+h+='<div class="sdt">'+s.signal_detail+'</div><div style="font-size:10px;color:var(--td);margin-top:5px">'+s.move_desc+'</div>';
+if(s.momentum_note)h+='<div style="font-size:10px;color:var(--p);margin-top:6px">'+s.momentum_note+'</div>';
+if(s.dxy_signal&&s.dxy_signal.direction!=='flat'){var dsc=s.dxy_signal.color;h+='<div style="font-size:10px;color:var(--'+dsc+');margin-top:4px">'+s.dxy_signal.msg+'</div>';}
+if(s.spread_signal){var ssc=s.spread_signal.color;h+='<div class="arb-box" style="border-left-color:var(--'+ssc+')"><div class="arb-dir" style="color:var(--'+ssc+')">'+s.spread_signal.direction+'</div><div class="arb-msg">'+s.spread_signal.msg+'</div></div>';}
+h+='</div>';
+// Price Context
+h+='<div class="pn cp"><div class="pl">Price Context</div>';
+if(m.range_90d){var r90l=m.range_90d[0],r90h=m.range_90d[1],r90r=r90h-r90l;
+var ppos=r90r>0?((m.price-r90l)/r90r*100):50;
+h+='<div class="ctx-l" style="margin-bottom:2px">90-Day Range</div>';
+h+='<div class="rng-bar"><div class="rng-fill" style="width:100%"></div><div class="rng-dot" style="left:'+ppos+'%"></div></div>';
+h+='<div class="rng-labels"><span>'+r90l.toFixed(2)+'</span><span>'+r90h.toFixed(2)+'</span></div>';}
+h+='<div style="margin-top:8px">';
+if(m.pct_30d!==undefined)h+='<div class="ctx-row"><span class="ctx-l">30-Day Percentile</span><span class="ctx-v" style="color:'+(m.pct_30d>75?'var(--g)':m.pct_30d<25?'var(--r)':'var(--tx)')+'">'+m.pct_30d+'th</span></div>';
+if(m.pct_90d!==undefined)h+='<div class="ctx-row"><span class="ctx-l">90-Day Percentile</span><span class="ctx-v" style="color:'+(m.pct_90d>75?'var(--g)':m.pct_90d<25?'var(--r)':'var(--tx)')+'">'+m.pct_90d+'th</span></div>';
+h+='</div>';
+if(m.roc){h+='<div style="margin-top:8px"><div class="ctx-l" style="margin-bottom:5px">Momentum</div>';
+['1d','3d','5d','10d'].forEach(function(k){if(!m.roc[k])return;var v=m.roc[k];
+var clr=v.change>=0?'var(--g)':'var(--r)';var w=Math.min(Math.abs(v.pct)*10,50);
+h+='<div class="roc-row"><span class="roc-label">'+k+'</span><div class="roc-bar-wrap"><div class="roc-bar" style="width:'+w+'%;background:'+clr+';'+(v.change<0?'right:50%;':'left:50%')+'"></div></div>';
+h+='<span class="roc-val" style="color:'+clr+'">'+(v.change>=0?'+':'')+v.change.toFixed(2)+' ('+v.pct+'%)</span></div>';});
+h+='</div>';}
+if(m.streak&&m.streak>=2){h+='<div class="streak-badge '+(m.streak_dir||'up')+'">'+(m.streak_dir==='up'?'\u25B2':'\u25BC')+' '+m.streak+' day streak</div>';}
+if(m.avg_daily_range){h+='<div class="ctx-row" style="margin-top:6px"><span class="ctx-l">Avg Daily Range (10d)</span><span class="ctx-v">'+m.avg_daily_range.toFixed(2)+'c</span></div>';
+if(m.vol_vs_avg)h+='<div class="ctx-row"><span class="ctx-l">Today vs Avg Range</span><span class="ctx-v" style="color:'+(m.vol_vs_avg>1.5?'var(--y)':'var(--tx)')+'">'+m.vol_vs_avg.toFixed(1)+'x</span></div>';}
+h+='</div>';
+// GTC
+h+='<div class="pn gp"><div class="pl">GTC Suggestions</div>';
+if(cfg.fix_target)h+='<div class="tl"><span class="tll">Fix Target</span><span class="tlv">$'+cfg.fix_target.toFixed(2)+'</span></div>';
+if(gtc.length>0){gtc.forEach(function(g){h+='<div class="gi '+g.urgency+'"><div class="ga '+g.urgency+'">'+g.action+'</div><div class="gd">'+g.detail+'</div></div>';});}
+else h+='<div class="nd">No suggestions</div>';
+h+='</div>';
+// Position
+h+='<div class="pn posp"><div class="pl">Position</div>';
+if(r){var mc=r.mtm_pl>=0?'pos':'neg';
+h+='<div class="pg"><div class="pk"><div class="pkl">Net Unpriced Long</div><div class="pkv">'+n(Math.round(r.net_lbs))+' lbs</div><div class="pks">'+r.loads_unpriced+' loads</div></div>';
+h+='<div class="pk"><div class="pkl">Avg Cost</div><div class="pkv">$'+r.avg_cost.toFixed(4)+'</div></div>';
+h+='<div class="pk"><div class="pkl">Hedged</div><div class="pkv">'+r.hedge_pct+'%</div></div>';
+h+='<div class="pk"><div class="pkl">Mark-to-Market</div><div class="pkv '+mc+'">$'+n(Math.round(r.mtm_pl))+'</div></div></div>';
+if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">As of: '+pos.updated+'</div>';
+}else h+='<div class="nd">Drop Hedge xlsx into data/</div>';
+h+='</div>';
+// Sales
+h+='<div class="pn slp"><div class="pl">Sales Breakdown</div>';
+if(r&&(r.priced_sales_lbs>0||r.unpriced_sales_lbs>0)){
+var tt=r.priced_sales_lbs+r.unpriced_sales_lbs,pp=tt>0?(r.priced_sales_lbs/tt*100):0;
+h+='<div class="sbar"><div class="sbp" style="width:'+pp+'%"></div><div class="sbu" style="width:'+(100-pp)+'%"></div></div>';
+h+='<div class="slg"><div class="sli"><div class="sld" style="background:var(--g)"></div>Priced '+n(Math.round(r.priced_sales_lbs))+' lbs ('+pp.toFixed(0)+'%)</div>';
+h+='<div class="sli"><div class="sld" style="background:var(--p)"></div>Unpriced '+n(Math.round(r.unpriced_sales_lbs))+' lbs ('+(100-pp).toFixed(0)+'%)</div></div>';
+h+='<div style="margin-top:2px">';
+if(r.sales_unpriced_shipped_lbs>0)h+='<div class="cat-row hot"><span class="cat-label">\u26A0 Unpriced / Shipped</span><span class="cat-val hot">'+n(Math.round(r.sales_unpriced_shipped_lbs))+' lbs</span></div>';
+h+='<div class="cat-row ok"><span class="cat-label">Priced / Unshipped</span><span class="cat-val ok">'+n(Math.round(r.sales_priced_unshipped_lbs))+' lbs</span></div>';
+h+='<div class="cat-row chill"><span class="cat-label">Unpriced / Unshipped</span><span class="cat-val chill">'+n(Math.round(r.sales_unpriced_unshipped_lbs))+' lbs</span></div>';
+h+='</div>';
+if(r.priced_sales_avg>0)h+='<div class="rs" style="margin-top:6px"><span class="rsl">Avg priced</span><span class="rsv">$'+r.priced_sales_avg.toFixed(4)+'</span></div>';
+}else h+='<div class="nd">No sales data</div>';
+h+='</div>';
+// Risk
+h+='<div class="pn rp"><div class="pl">Risk</div>';
+if(r){var hp=Math.min(r.hedge_pct,100),bc=hp>70?'var(--g)':hp>30?'var(--y)':'var(--r)';
+h+='<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:var(--tm)">Hedge Coverage</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+r.hedge_pct+'%</span></div>';
+h+='<div class="rbg"><div class="rbf" style="width:'+hp+'%;background:'+bc+'"></div></div></div>';
+h+='<div class="rs"><span class="rsl">Per 1c</span><span class="rsv">$'+n(Math.round(Math.abs(r.risk_per_cent)))+'</span></div>';
+h+='<div class="rs"><span class="rsl">Per 10c</span><span class="rsv" style="color:'+(Math.abs(r.risk_per_dime)>10000?'var(--r)':'var(--tx)')+'">$'+n(Math.round(Math.abs(r.risk_per_dime)))+'</span></div>';
+h+='<div class="rs"><span class="rsl">Unhedged</span><span class="rsv">'+n(Math.round(r.unhedged_lbs))+' lbs</span></div>';
+}else h+='<div class="nd">Load position to see risk</div>';
+h+='</div>';
+// Decisions
+h+='<div class="pn dp s2"><div class="pl">What To Do</div><div class="dl">';
+dec.forEach(function(d){var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRICED')>=0)cls='di warn';
+if(d.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d.indexOf('\uD83D\uDD34')>=0)cls='di fix-bad';
+h+='<div class="'+cls+'">'+d+'</div>';});
+h+='</div></div>';
+$('db').innerHTML=h;
+if(m.sparkline&&m.sparkline.length)rsk(m.sparkline);
+}
+function rsk(data){var c=$('sk');if(!c||!data.length)return;var w=c.clientWidth||260,h=45;var p=data.map(function(d){return d.close});
+var mn=Math.min.apply(null,p),mx=Math.max.apply(null,p),rg=mx-mn||1;
+var pts=p.map(function(v,i){return(i/(p.length-1))*w+','+(h-((v-mn)/rg)*(h-6)-3)}).join(' ');
+var fp='0,'+h+' '+pts+' '+w+','+h;var t=p[p.length-1]>=p[0],cl=t?'#00e59b':'#ff4757';
+var ly=h-((p[p.length-1]-mn)/rg)*(h-6)-3;
+c.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><defs><linearGradient id="sf" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+cl+'" stop-opacity=".15"/><stop offset="100%" stop-color="'+cl+'" stop-opacity="0"/></linearGradient></defs><polygon points="'+fp+'" fill="url(#sf)"/><polyline points="'+pts+'" fill="none" stroke="'+cl+'" stroke-width="1.5" stroke-linejoin="round"/><circle cx="'+w+'" cy="'+ly+'" r="2.5" fill="'+cl+'"/></svg>';}
+fd();setInterval(fd,60000);
+</script>
+</body>
+</html>
