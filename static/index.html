@@ -287,11 +287,11 @@ h+='<div class="pn mgp"><div class="pl">If You Priced Now</div>';
 var mp=d.margin_projection;
 if(mp){
 var gmCls=mp.gross_margin_per_lb>=0?'pos':'neg';
-h+='<div class="rs"><span class="rsl">Avg Sell Price</span><span class="rsv">$'+mp.avg_sell_price.toFixed(4)+'</span></div>';
-h+='<div class="rs"><span class="rsl">Avg Cost/lb</span><span class="rsv">$'+mp.avg_cost.toFixed(4)+'</span></div>';
-h+='<div class="rs"><span class="rsl">Gross Margin/lb</span><span class="rsv '+gmCls+'">$'+mp.gross_margin_per_lb.toFixed(4)+'</span></div>';
-h+='<div class="rs"><span class="rsl">Total Gross Margin</span><span class="rsv '+gmCls+'">$'+n(Math.round(mp.total_gross_margin))+'</span></div>';
-h+='<div class="rs"><span class="rsl">Margin %</span><span class="rsv '+gmCls+'">'+mp.margin_pct.toFixed(1)+'%</span></div>';
+h+='<div style="display:flex;justify-content:space-between;align-items:baseline;padding:10px 0;margin-bottom:6px;border-bottom:1px solid var(--bd)"><span style="font-size:13px;font-weight:600;color:var(--tx)">Gross Margin/lb</span><span class="'+gmCls+'" style="font-family:JetBrains Mono,monospace;font-size:20px;font-weight:700">$'+mp.gross_margin_per_lb.toFixed(4)+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px;margin-bottom:3px"><span style="font-size:10px;color:var(--td)">Avg Sell Price</span><span style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--tm)">$'+mp.avg_sell_price.toFixed(4)+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px;margin-bottom:3px"><span style="font-size:10px;color:var(--td)">Avg Cost/lb</span><span style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--tm)">$'+mp.avg_cost.toFixed(4)+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px;margin-bottom:3px"><span style="font-size:10px;color:var(--td)">Total Gross Margin</span><span class="'+gmCls+'" style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:600">$'+n(Math.round(mp.total_gross_margin))+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px"><span style="font-size:10px;color:var(--td)">Margin %</span><span class="'+gmCls+'" style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:600">'+mp.margin_pct.toFixed(1)+'%</span></div>';
 }else h+='<div class="nd">Need position + market data</div>';
 h+='</div>';
 // Risk
