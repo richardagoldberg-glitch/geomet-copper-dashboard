@@ -32,7 +32,8 @@ def load_config():
     defaults = {
         "METALS_DEV_API_KEY": "", "LME_MANUAL_USD_MT": 0,
         "FIX_TARGET": 5.90, "GTC_LEVELS": [5.90, 5.95, 6.00, 6.05],
-        "TRUCKLOAD_LBS": 42000, "ATTENTION_MOVE": 0.10, "BIG_MOVE": 0.20,
+        "TRUCKLOAD_LBS": 42000, "BASELINE_LBS": 200000,
+        "ATTENTION_MOVE": 0.10, "BIG_MOVE": 0.20,
         "COMEX_WAREHOUSE_MT": 0, "COMEX_WAREHOUSE_DATE": "",
         "COMEX_WAREHOUSE_TREND": "", "FRED_API_KEY": "",
         "FED_FUNDS_RATE": "4.25-4.50", "FED_FUNDS_MIDPOINT": 4.375,
@@ -1180,6 +1181,17 @@ def gen_decisions(sig, risk, md, fix_window):
         uh = risk["unhedged_lbs"]; rd = risk["risk_per_dime"]
         if uh > 0: dec.append(f"Long {uh:,.0f} lbs unpriced \u2014 ${abs(rd):,.0f} per 10c move")
 
+    # Baseline deviation alert (1 truckload threshold)
+    if risk and risk.get("baseline_deviation") is not None:
+        dev = risk["baseline_deviation"]
+        baseline = risk["baseline_lbs"]
+        tl = CFG["TRUCKLOAD_LBS"]
+        if abs(dev) > tl:
+            if dev > 0:
+                dec.append(f"\u26A0 {abs(dev):,.0f} lbs OVER baseline ({baseline:,.0f}) \u2014 consider pricing/trimming")
+            else:
+                dec.append(f"\u26A0 {abs(dev):,.0f} lbs UNDER baseline ({baseline:,.0f}) \u2014 look for buys")
+
     if not dec: dec.append("Markets stable \u2014 normal operations")
     return dec
 
@@ -1214,6 +1226,9 @@ class Handler(SimpleHTTPRequestHandler):
             sig = compute_signals(md)
             pos = load_position()
             risk = calc_risk(pos, md)
+            if risk:
+                risk["baseline_lbs"] = CFG["BASELINE_LBS"]
+                risk["baseline_deviation"] = risk["net_lbs"] - CFG["BASELINE_LBS"]
             fix_window = calc_fix_window(md, sig)
             dec = gen_decisions(sig, risk, md, fix_window)
             gtc = gen_gtc(pos, md)
@@ -1222,7 +1237,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
                 "margin_projection": margin,
-                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"]},
+                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             self.wfile.write(json.dumps(payload).encode())
