@@ -57,16 +57,37 @@ Dashboard serves at **http://localhost:8777**.
 
 ## Hedge Worksheet
 
-The dashboard auto-reads `Hedge*.xlsx` files from:
-- `./data/`
-- OneDrive sync folder (`Pricing_Hedge - Hedge Worksheet`)
+The dashboard reads `Hedge*.xlsx` files from `./data/`. Files should follow the naming convention `HedgeMMDDYYYY.xlsx` and contain `POSITION`, `SOSOLIDS`, and `O SOLID SALE` sheets.
 
-Files should follow the naming convention `HedgeMMDDYYYY.xlsx` and contain `POSITION`, `SOSOLIDS`, and `O SOLID SALE` sheets.
+A sync script automatically copies the latest hedge file from OneDrive every 5 minutes (see launchd setup below).
 
 ## launchd (macOS)
 
-A launchd plist is available to run the dashboard as a persistent service:
+Two launchd services keep the dashboard running and hedge data in sync. Install both by copying the plists and loading them:
 
-```
+```bash
+cp com.geomet.copper-dashboard.plist ~/Library/LaunchAgents/
+cp com.geomet.sync-hedge.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.geomet.copper-dashboard.plist
+launchctl load ~/Library/LaunchAgents/com.geomet.sync-hedge.plist
 ```
+
+| Service | What it does |
+|---|---|
+| `com.geomet.copper-dashboard` | Runs `app.py` on port 8777. Auto-restarts on crash or reboot. |
+| `com.geomet.sync-hedge` | Copies the latest `Hedge*.xlsx` from OneDrive to `./data/` every 5 minutes. Uses `osascript`/Finder to bypass macOS CloudStorage permissions. |
+
+To check status:
+
+```bash
+launchctl list | grep geomet
+```
+
+To restart:
+
+```bash
+launchctl stop com.geomet.copper-dashboard
+launchctl start com.geomet.copper-dashboard
+```
+
+Logs are written to `dashboard.log`, `dashboard_err.log`, and `sync_hedge.log` in the project directory.
