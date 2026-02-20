@@ -635,7 +635,10 @@ def read_hedge_spreadsheet(filepath):
             for i, row in enumerate(grid):
                 for j, cell in enumerate(row):
                     if str(cell).strip() == "ICW INV" and j + 1 < len(row) and isinstance(row[j + 1], (int, float)):
-                        result["inv_by_commodity"]["Chops"] += float(row[j + 1])
+                        icw_cu = float(row[j + 1])
+                        result["inv_by_commodity"]["Chops"] += icw_cu
+                        result["icw_cu_lbs"] = icw_cu
+                        result["chops_solid_lbs"] = result["inv_by_commodity"]["Chops"] - icw_cu
 
         shipped_orders = {}
         if "O SOLID SALE" in wb.sheetnames:
@@ -1029,6 +1032,8 @@ def calc_risk(pos, md):
         "surplus_deficit_lbs": pos.get("total_inv_po", 0) - (pos.get("priced_sales_lbs", 0) + pos.get("unpriced_sales_lbs", 0)),
         "inv_by_commodity": pos.get("inv_by_commodity", {}),
         "sales_by_commodity": pos.get("sales_by_commodity", {}),
+        "icw_cu_lbs": pos.get("icw_cu_lbs", 0),
+        "chops_solid_lbs": pos.get("chops_solid_lbs", 0),
     }
 
 

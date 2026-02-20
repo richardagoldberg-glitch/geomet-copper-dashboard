@@ -271,7 +271,13 @@ h+='<span style="flex:1;font-weight:600">'+cat+'</span>';
 h+='<span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(inv))+'</span>';
 h+='<span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(sal))+'</span>';
 h+='<span class="'+covCls+'" style="width:60px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600">'+cov.toFixed(0)+'%</span>';
-h+='</div>';}
+h+='</div>';
+if(cat==='Chops'&&r.icw_cu_lbs>0){
+h+='<div style="display:flex;font-size:9px;padding:2px 2px 2px 12px;color:var(--tm);border-bottom:1px solid var(--bd)">';
+h+='<span style="flex:1">Chopped</span><span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.chops_solid_lbs))+'</span><span style="width:135px"></span></div>';
+h+='<div style="display:flex;font-size:9px;padding:2px 2px 2px 12px;color:var(--tm);border-bottom:1px solid var(--bd)">';
+h+='<span style="flex:1">Still insulated</span><span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.icw_cu_lbs))+'</span><span style="width:135px"></span></div>';
+}}
 h+='</div>';
 }else h+='<div class="nd">No supply data</div>';
 h+='</div>';
