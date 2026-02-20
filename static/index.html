@@ -123,13 +123,23 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 @media(max-width:1400px){.db{grid-template-columns:1fr 1fr 1fr}.s2{grid-column:span 1}}
 @media(max-width:1000px){.db{grid-template-columns:1fr 1fr}}
 @media(max-width:700px){.db{grid-template-columns:1fr}.pv{font-size:28px}}
+body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--tm:#5a6577;--td:#8494a7;
+--g:#00a86b;--gd:rgba(0,168,107,.12);--r:#d63447;--rd:rgba(214,52,71,.12);
+--y:#c99000;--yd:rgba(201,144,0,.12);--o:#cc6a2a;--od:rgba(204,106,42,.12);
+--b:#2b7de9;--bdd:rgba(43,125,233,.12);--cu:#a96840;--cg:rgba(169,104,64,.15);
+--p:#7c5cbf;--pd:rgba(124,92,191,.12)}
+.theme-btn{background:none;border:1px solid var(--bd);border-radius:4px;cursor:pointer;padding:3px 8px;font-size:14px;line-height:1;color:var(--tm)}
+.theme-btn:hover{background:var(--sf2)}
 </style>
 </head>
 <body>
 <div class="hdr"><div class="hdr-l"><div class="logo">GEOMET</div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
-<div class="hdr-r"><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><div class="sd" id="sd"></div></div></div>
+<div class="hdr-r"><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
 <div class="db" id="db"><div class="ld"><div class="ls"></div>Fetching copper data...</div></div>
 <script>
+function applyTheme(t){if(t==='light')document.body.classList.add('light');else document.body.classList.remove('light');var b=document.getElementById('thm');if(b)b.textContent=t==='light'?'\u2600\uFE0F':'\uD83C\uDF19'}
+(function(){var t=localStorage.getItem('cu-theme');if(t)applyTheme(t);fetch('/api/theme').then(function(r){return r.json()}).then(function(d){applyTheme(d.theme);localStorage.setItem('cu-theme',d.theme)}).catch(function(){})})();
+function toggleTheme(){var l=!document.body.classList.contains('light');var t=l?'light':'dark';applyTheme(t);localStorage.setItem('cu-theme',t);fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:t})}).catch(function(){})}
 function n(v){return v?Number(v).toLocaleString():'0'}
 function $(id){return document.getElementById(id)}
 async function fd(){try{var r=await fetch('/api/data');var d=await r.json();render(d);$('sd').style.background='var(--g)'}catch(e){$('sd').style.background='var(--r)';$('ri').textContent='Connection error'}}
@@ -146,7 +156,9 @@ h+='<div class="pn pp"><div class="pl">COMEX Copper (HG)</div><div class="pm"><d
 h+='<div class="pc '+cc+'">'+cs+m.change.toFixed(4)+' ('+cs+m.change_pct.toFixed(2)+'%)</div></div>';
 h+='<div class="ps">Prev settle: '+m.prev_close.toFixed(4)+'</div>';
 if(m.lme_price_lb){
-h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+m.lme_price_lb.toFixed(4)+'/lb</span></div>';
+h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+m.lme_price_lb.toFixed(4)+'/lb';
+if(m.lme_change!==null&&m.lme_change!==undefined){var lcc=m.lme_change>=0?'up':'dn',lcs=m.lme_change>=0?'+':'';h+=' <span class="pc '+lcc+'" style="font-size:9px;padding:1px 4px;margin-left:4px">'+lcs+m.lme_change.toFixed(4)+' ('+lcs+m.lme_change_pct.toFixed(2)+'%)</span>';}
+h+='</span></div>';
 if(m.lme_price_mt)h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+n(Math.round(m.lme_price_mt))+'/MT</span></div>';
 if(m.comex_lme_spread!==null&&m.comex_lme_spread!==undefined){var spc=m.comex_lme_spread>=0?'var(--g)':'var(--b)';
 h+='<div class="lr"><span class="ll">COMEX-LME Spread</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb</span></div>';}

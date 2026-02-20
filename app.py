@@ -875,9 +875,16 @@ def fetch_copper_data():
         spread = round(price - lme_price, 4) if lme_price else None
         spread_pct = round((spread / lme_price) * 100, 2) if lme_price and spread else None
         spread_intel = None
+        lme_change = None; lme_change_pct = None
         if spread is not None and lme_price:
             history = save_spread_entry(round(price, 4), round(lme_price, 4), round(spread, 4))
             spread_intel = compute_spread_intelligence(history, spread)
+            # LME daily change from previous day's spread history entry
+            if len(history) >= 2:
+                prev_lme = history[-2].get("lme")
+                if prev_lme:
+                    lme_change = round(lme_price - prev_lme, 4)
+                    lme_change_pct = round((lme_change / prev_lme) * 100, 2)
 
         dxy = fetch_dxy()
         china = get_china_status()
@@ -891,6 +898,7 @@ def fetch_copper_data():
             "vol_ratio": round(vol_ratio, 2), "recent_closes": [round(c, 4) for c in recent],
             "sparkline": spark, "copper_source": copper_source,
             "lme_price_lb": lme_price, "lme_price_mt": lme_mt, "lme_source": lme_source,
+            "lme_change": lme_change, "lme_change_pct": lme_change_pct,
             "comex_lme_spread": spread, "comex_lme_spread_pct": spread_pct, "spread_intel": spread_intel,
             "today_high": round(today_high, 4), "today_low": round(today_low, 4),
             "today_range": round(today_range, 4),
@@ -1215,8 +1223,29 @@ def load_position():
     return None
 
 
+THEME_FILE = DATA_DIR / "theme.json"
+
+def get_theme():
+    if THEME_FILE.exists():
+        try:
+            with open(THEME_FILE) as f: return json.load(f).get("theme", "dark")
+        except: pass
+    return "dark"
+
+def set_theme(theme):
+    try:
+        with open(THEME_FILE, "w") as f: json.dump({"theme": theme}, f)
+    except: pass
+
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/api/theme":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"theme": get_theme()}).encode())
+            return
         if self.path == "/api/data":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -1250,6 +1279,20 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Type", ct); self.end_headers()
             self.wfile.write(fp.read_bytes())
         else: self.send_error(404)
+    def do_POST(self):
+        if self.path == "/api/theme":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            theme = body.get("theme", "dark")
+            if theme not in ("dark", "light"): theme = "dark"
+            set_theme(theme)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"theme": theme}).encode())
+            return
+        self.send_error(404)
     def log_message(self, *a): pass
 
 def main():
