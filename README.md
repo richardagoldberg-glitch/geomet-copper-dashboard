@@ -2,6 +2,8 @@
 
 Real-time copper market dashboard for Geomet Recycling. Tracks COMEX and LME copper prices, hedging positions, and generates actionable trading signals.
 
+![Dashboard Screenshot](static/screenshot.png)
+
 ## Features
 
 - **Live COMEX/LME pricing** with 30-day spread tracking and COMEX-LME arbitrage signals
