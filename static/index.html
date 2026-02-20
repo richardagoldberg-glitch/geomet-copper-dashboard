@@ -29,6 +29,7 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .pl::before{content:'';width:3px;height:10px;border-radius:1px}
 .pp .pl::before{background:var(--cu)}.tp .pl::before{background:var(--b)}.sp .pl::before{background:var(--y)}
 .gp .pl::before{background:var(--cu)}.posp .pl::before{background:var(--g)}.slp .pl::before{background:var(--p)}.sap .pl::before{background:var(--b)}
+.mgp .pl::before{background:var(--cu)}
 .rp .pl::before{background:var(--r)}.dp .pl::before{background:var(--o)}.cp .pl::before{background:var(--p)}.fwp .pl::before{background:var(--g)}
 .pm{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
 .pv{font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:700;line-height:1;letter-spacing:-1px}
@@ -280,6 +281,18 @@ h+='<span style="flex:1">Still insulated</span><span style="width:75px;text-alig
 }}
 h+='</div>';
 }else h+='<div class="nd">No supply data</div>';
+h+='</div>';
+// Margin Projection — "If You Priced Now"
+h+='<div class="pn mgp"><div class="pl">If You Priced Now</div>';
+var mp=d.margin_projection;
+if(mp){
+var gmCls=mp.gross_margin_per_lb>=0?'pos':'neg';
+h+='<div class="rs"><span class="rsl">Avg Sell Price</span><span class="rsv">$'+mp.avg_sell_price.toFixed(4)+'</span></div>';
+h+='<div class="rs"><span class="rsl">Avg Cost/lb</span><span class="rsv">$'+mp.avg_cost.toFixed(4)+'</span></div>';
+h+='<div class="rs"><span class="rsl">Gross Margin/lb</span><span class="rsv '+gmCls+'">$'+mp.gross_margin_per_lb.toFixed(4)+'</span></div>';
+h+='<div class="rs"><span class="rsl">Total Gross Margin</span><span class="rsv '+gmCls+'">$'+n(Math.round(mp.total_gross_margin))+'</span></div>';
+h+='<div class="rs"><span class="rsl">Margin %</span><span class="rsv '+gmCls+'">'+mp.margin_pct.toFixed(1)+'%</span></div>';
+}else h+='<div class="nd">Need position + market data</div>';
 h+='</div>';
 // Risk
 h+='<div class="pn rp"><div class="pl">Risk</div>';

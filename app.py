@@ -699,11 +699,13 @@ def read_hedge_spreadsheet(filepath):
                     if priced_tons > 0:
                         priced_total += priced_tons; priced_value += priced_tons * final_price
                         sale["price"] = round(final_price, 4); sale["status"] = "PRICED"
+                        sale["priced_lbs"] = priced_tons
                         if order not in shipped_orders:
                             result["sales_priced_unshipped"].append(sale)
                             result["sales_priced_unshipped_lbs"] += priced_tons
                     elif open_priced > 0:
                         unpriced_total += open_priced; sale["status"] = "UNPRICED"
+                        sale["open_lbs"] = open_priced
                         if order in shipped_orders:
                             sale["shipped_lbs"] = shipped_orders[order]
                             result["sales_unpriced_shipped"].append(sale)
@@ -1059,6 +1061,55 @@ def calc_risk(pos, md):
     }
 
 
+def calc_margin_projection(pos, md, risk):
+    if not pos or not md or not risk: return None
+    comex = md.get("price", 0)
+    lme = md.get("lme_price_lb", 0)
+    avg_cost = risk.get("avg_cost", 0)
+    if not comex or not avg_cost: return None
+
+    # Priced sales — use pre-computed aggregates (priced_tons × final_price)
+    priced_lbs = pos.get("priced_sales_lbs", 0)
+    priced_avg = pos.get("priced_sales_avg", 0)
+    priced_rev = priced_lbs * priced_avg
+
+    # Unpriced sales — project each at current market using open_lbs
+    unpriced_rev = 0; unpriced_lbs = 0
+    for sale_list in [pos.get("sales_unpriced_shipped", []), pos.get("sales_unpriced_unshipped", [])]:
+        for sale in sale_list:
+            lbs = sale.get("open_lbs", sale.get("lbs", 0))
+            spread = sale.get("spread", 0)
+            if lbs <= 0: continue
+            basis = sale.get("basis", "COMEX")
+            if basis == "LME" and lme:
+                proj = lme * spread if spread else lme
+            else:
+                proj = comex - spread if spread else comex
+            unpriced_rev += lbs * proj; unpriced_lbs += lbs
+
+    total_lbs = priced_lbs + unpriced_lbs
+    total_rev = priced_rev + unpriced_rev
+    if total_lbs <= 0: return None
+
+    avg_sell = total_rev / total_lbs
+    gm_per_lb = avg_sell - avg_cost
+    return {
+        "priced_revenue": round(priced_rev, 2),
+        "unpriced_revenue_now": round(unpriced_rev, 2),
+        "total_revenue_now": round(total_rev, 2),
+        "priced_lbs": round(priced_lbs),
+        "unpriced_lbs": round(unpriced_lbs),
+        "total_lbs": round(total_lbs),
+        "avg_sell_price": round(avg_sell, 4),
+        "avg_cost": round(avg_cost, 4),
+        "gross_margin_per_lb": round(gm_per_lb, 4),
+        "total_gross_margin": round(gm_per_lb * total_lbs, 2),
+        "margin_pct": round((gm_per_lb / avg_sell) * 100, 2) if avg_sell else 0,
+        "comex_now": round(comex, 4),
+        "lme_now": round(lme, 4) if lme else None,
+    }
+
+
 def gen_decisions(sig, risk, md, fix_window):
     dec = []
     if not sig: return ["Unable to fetch market data"]
@@ -1166,9 +1217,11 @@ class Handler(SimpleHTTPRequestHandler):
             fix_window = calc_fix_window(md, sig)
             dec = gen_decisions(sig, risk, md, fix_window)
             gtc = gen_gtc(pos, md)
+            margin = calc_margin_projection(pos, md, risk)
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
+                "margin_projection": margin,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
