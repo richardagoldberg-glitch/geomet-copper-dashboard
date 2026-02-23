@@ -38,6 +38,7 @@ def load_config():
         "COMEX_WAREHOUSE_MT": 0, "COMEX_WAREHOUSE_DATE": "",
         "COMEX_WAREHOUSE_TREND": "", "FRED_API_KEY": "",
         "FED_FUNDS_RATE": "4.25-4.50", "FED_FUNDS_MIDPOINT": 4.375,
+        "MONTHLY_FLOW": {"Chops": 171800, "BB": 162700, "#2": 106600, "#1": 82700},
     }
     if cfg_path.exists():
         try:
@@ -1680,6 +1681,22 @@ def gen_decisions(sig, risk, md, fix_window, roll=None):
             else:
                 dec.append(f"\u26A0 {abs(dev):,.0f} lbs UNDER baseline ({baseline:,.0f}) \u2014 look for buys")
 
+    # Sales pipeline alerts — flag grades under 2 months of sales
+    if risk:
+        mf = CFG.get("MONTHLY_FLOW", {})
+        sc = risk.get("sales_by_commodity", {})
+        thin = []
+        for grade, flow in mf.items():
+            if flow > 0:
+                sal = sc.get(grade, 0)
+                months = sal / flow
+                if months < 1:
+                    thin.append(f"{grade} ({months:.1f}mo)")
+                elif months < 2:
+                    thin.append(f"{grade} ({months:.1f}mo)")
+        if thin:
+            dec.append(f"\u26A0 Sales pipeline thin: {', '.join(thin)} \u2014 need to sell")
+
     if not dec: dec.append("Markets stable \u2014 normal operations")
     return dec
 
@@ -1843,7 +1860,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
                 "fixable_orders": fixable,
                 "margin_projection": margin, "contract_roll": roll,
-                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"]},
+                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             self.wfile.write(json.dumps(payload).encode())

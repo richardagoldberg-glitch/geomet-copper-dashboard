@@ -28,6 +28,15 @@ BIG_MOVE = 0.20         # 20c is significant
 
 
 
+# Monthly copper flow by grade (lbs/month) — from PBI 7/1/25-2/23/26
+# Used to calculate "months of sales remaining" per grade
+MONTHLY_FLOW = {
+    "Chops": 171800,
+    "BB": 162700,
+    "#2": 106600,
+    "#1": 82700,
+}
+
 # COMEX warehouse stocks (metric tons) — update from CME daily report
 # https://www.cmegroup.com/delivery_reports/MetalsIssueAndStopsYTDReport.pdf
 COMEX_WAREHOUSE_MT = 534000
