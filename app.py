@@ -82,11 +82,15 @@ def fetch_lme_price():
             req = urllib.request.Request(url, headers={"User-Agent": "GeometDashboard/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
+                print(f"[DEBUG] metals.dev response keys: {list(data.keys())}")
+                print(f"[DEBUG] metals.dev full response: {json.dumps(data, default=str)[:800]}")
                 if "rate" in data:
                     rate = data["rate"]
                     price_mt = rate["price"] if isinstance(rate, dict) else rate
                     price_lb = round(price_mt / MT_TO_LB, 4)
-                    _lme_cache = {"price_mt": round(price_mt, 2), "price_lb": price_lb, "timestamp": now, "source": "metals.dev"}
+                    # metals.dev /v1/metal/spot returns ~LME 3M (confirmed vs CQG LDKZA)
+                    _lme_cache = {"price_mt": round(price_mt, 2), "price_lb": price_lb,
+                                  "timestamp": now, "source": "metals.dev"}
                     return _lme_cache
         except Exception as e:
             print(f"[WARN] metals.dev API error: {e}")
@@ -97,6 +101,193 @@ def fetch_lme_price():
         _lme_cache = {"price_mt": manual, "price_lb": price_lb, "timestamp": now, "source": "manual"}
         return _lme_cache
     return {"price_mt": None, "price_lb": None, "timestamp": now, "source": "none"}
+
+
+# ---------------------------------------------------------------------------
+# REAL-TIME PRICE — investing.com API + yfinance intraday fallback
+# ---------------------------------------------------------------------------
+_rt_cache = {"price": None, "prev_close": None, "timestamp": 0, "source": None}
+_prev_settle_cache = {}  # keyed by ticker: {"price": ..., "timestamp": ...}
+
+def _fetch_prev_settle_yf(ticker="HG=F"):
+    """Get previous session's settlement from yfinance daily data (5-min cache per ticker)."""
+    global _prev_settle_cache
+    now = time.time()
+    cached = _prev_settle_cache.get(ticker, {})
+    if cached.get("price") and (now - cached.get("timestamp", 0)) < 300:
+        return cached["price"]
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        hd = t.history(period="5d", interval="1d")
+        if not hd.empty and len(hd) >= 2:
+            hd = hd.reset_index()
+            hd.columns = [c if isinstance(c, str) else c[0] for c in hd.columns]
+            for i in range(len(hd)):
+                print(f"[DEBUG] yf daily {ticker} bar {i}: {hd.iloc[i]['Date']} close={hd.iloc[i]['Close']:.4f}")
+            today_date = datetime.now().date()
+            last_date = hd.iloc[-1]["Date"]
+            if hasattr(last_date, 'date'):
+                last_date = last_date.date()
+            elif hasattr(last_date, 'to_pydatetime'):
+                last_date = last_date.to_pydatetime().date()
+            if last_date >= today_date:
+                prev = round(float(hd.iloc[-2]["Close"]), 4)
+                print(f"[INFO] Prev settle {ticker} (today in data): ${prev:.4f} from {hd.iloc[-2]['Date']}")
+            else:
+                prev = round(float(hd.iloc[-1]["Close"]), 4)
+                print(f"[INFO] Prev settle {ticker} (no today): ${prev:.4f} from {hd.iloc[-1]['Date']}")
+            _prev_settle_cache[ticker] = {"price": prev, "timestamp": now}
+            return prev
+    except Exception as e:
+        print(f"[WARN] Prev settle fetch error ({ticker}): {e}")
+        import traceback; traceback.print_exc()
+    return None
+
+
+def _get_active_yf_ticker():
+    """Determine which COMEX copper contract to show based on FND proximity.
+    Returns (ticker, active_contract, label) where active_contract is 'front' or 'next'.
+    Near FND (<=5 trading days), show the next month as liquidity migrates.
+    """
+    today = datetime.now().date()
+    MONTHS = [
+        ("H", "Mar", 3, 2), ("K", "May", 5, 4), ("N", "Jul", 7, 6),
+        ("U", "Sep", 9, 8), ("Z", "Dec", 12, 11),
+    ]
+    contracts = []
+    for year in [today.year, today.year + 1]:
+        for code, label, del_mo, notice_mo in MONTHS:
+            last = calendar.monthrange(year, notice_mo)[1]
+            d = datetime(year, notice_mo, last).date()
+            while d.weekday() >= 5:
+                d -= timedelta(days=1)
+            yy = str(year)[-2:]
+            contracts.append({"code": code, "yf": f"HG{code}{yy}.CMX", "fnd": d})
+    contracts.sort(key=lambda c: c["fnd"])
+
+    front = None
+    next_mo = None
+    for i, c in enumerate(contracts):
+        if c["fnd"] >= today:
+            front = c
+            if i + 1 < len(contracts):
+                next_mo = contracts[i + 1]
+            break
+
+    if not front:
+        return "HG=F", "front"
+
+    # Count trading days to FND
+    days = 0
+    d = today + timedelta(days=1)
+    while d <= front["fnd"]:
+        if d.weekday() < 5:
+            days += 1
+        d += timedelta(days=1)
+
+    # Show next month when <=5 trading days to FND (liquidity migrating)
+    if days <= 5 and next_mo:
+        return next_mo["yf"], "next"
+    return front["yf"], "front"
+
+
+def _fetch_realtime_price():
+    """Get most current COMEX copper price (1-min cache).
+    Shows the most liquid contract: front month normally, next month near FND.
+    Also tries investing.com first (real-time) before yfinance (5-min delayed).
+    Returns dict with price, prev_close, source, and active_contract.
+    """
+    global _rt_cache
+    now = time.time()
+    if _rt_cache["price"] and (now - _rt_cache["timestamp"]) < 60:
+        return _rt_cache
+
+    # Determine which contract to show based on FND proximity
+    active_ticker, active_contract = _get_active_yf_ticker()
+
+    # Method 1: investing.com chart API (real-time, but may be Cloudflare-blocked)
+    try:
+        import urllib.request
+        url = "https://api.investing.com/api/financialdata/8831/historical/chart/?period=P1D&interval=PT5M&pointscount=60"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "domain-id": "www",
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode()
+            data = json.loads(raw)
+
+            bars = None
+            if isinstance(data, dict) and "data" in data:
+                bars = data["data"]
+            elif isinstance(data, list):
+                bars = data
+
+            if bars and len(bars) > 0:
+                latest = bars[-1]
+                price = 0
+                if isinstance(latest, list) and len(latest) > 4:
+                    price = float(latest[4])
+                elif isinstance(latest, dict):
+                    for key in ("close", "c", "last_close", "last", "price"):
+                        if key in latest and latest[key]:
+                            price = float(latest[key]); break
+
+                if price > 1:
+                    # investing.com tracks May — use May prev settle
+                    prev_close = _fetch_prev_settle_yf(active_ticker)
+                    if not prev_close:
+                        prev_close = _fetch_prev_settle_yf("HG=F")
+                    _rt_cache = {"price": round(price, 4), "prev_close": prev_close,
+                                 "timestamp": now, "source": "investing.com",
+                                 "active_contract": "next"}
+                    print(f"[INFO] RT from investing.com: ${price:.4f}")
+                    return _rt_cache
+    except Exception as e:
+        print(f"[WARN] investing.com RT error: {e}")
+
+    # Method 2: yfinance intraday — use the active contract
+    try:
+        import yfinance as yf
+        t = yf.Ticker(active_ticker)
+        h = t.history(period="1d", interval="5m")
+        if not h.empty:
+            h = h.reset_index()
+            h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+            price = float(h.iloc[-1]["Close"])
+            if price > 1:
+                prev_close = _fetch_prev_settle_yf(active_ticker)
+                _rt_cache = {"price": round(price, 4), "prev_close": prev_close,
+                             "timestamp": now, "source": "yfinance",
+                             "active_contract": active_contract}
+                print(f"[INFO] RT from yfinance ({active_ticker}): ${price:.4f} (prev settle: {prev_close})")
+                return _rt_cache
+    except Exception as e:
+        print(f"[WARN] yfinance {active_ticker} intraday error: {e}")
+
+    # Method 3: fallback to HG=F if specific contract failed
+    if active_ticker != "HG=F":
+        try:
+            import yfinance as yf
+            t = yf.Ticker("HG=F")
+            h = t.history(period="1d", interval="5m")
+            if not h.empty:
+                h = h.reset_index()
+                h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+                price = float(h.iloc[-1]["Close"])
+                if price > 1:
+                    prev_close = _fetch_prev_settle_yf("HG=F")
+                    _rt_cache = {"price": round(price, 4), "prev_close": prev_close,
+                                 "timestamp": now, "source": "yfinance",
+                                 "active_contract": "front"}
+                    print(f"[INFO] RT fallback from yfinance (HG=F): ${price:.4f}")
+                    return _rt_cache
+        except Exception as e:
+            print(f"[WARN] yfinance HG=F fallback error: {e}")
+
+    return _rt_cache
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +467,41 @@ def get_china_status():
 
 
 # ---------------------------------------------------------------------------
+# LME STATUS — electronic + ring hours (London time)
+# ---------------------------------------------------------------------------
+def get_lme_status():
+    """LME market hours status based on London time.
+    LME Select (electronic): 01:00-19:00 London
+    Official Ring session: 11:40-17:00 London
+    """
+    from datetime import timezone
+    import zoneinfo
+    try:
+        london = zoneinfo.ZoneInfo("Europe/London")
+    except Exception:
+        # Fallback: UTC offset approximation (GMT/BST)
+        london = timezone.utc
+    now_london = datetime.now(london)
+    wd = now_london.weekday()
+    hr = now_london.hour
+    mn = now_london.minute
+    t = hr * 60 + mn  # minutes since midnight
+
+    if wd >= 5:
+        return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "weekend"}
+
+    # Ring session: 11:40 (700) - 17:00 (1020) London
+    if 700 <= t < 1020:
+        return {"status": "RING", "detail": "LME RING", "color": "green", "session": "ring"}
+
+    # LME Select electronic: 01:00 (60) - 19:00 (1140) London
+    if 60 <= t < 1140:
+        return {"status": "OPEN", "detail": "LME OPEN", "color": "green", "session": "electronic"}
+
+    return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "closed"}
+
+
+# ---------------------------------------------------------------------------
 # SPREAD HISTORY
 # ---------------------------------------------------------------------------
 def load_spread_history():
@@ -429,6 +655,41 @@ def calc_fix_window(md, sig):
     elif trend == "DOWNTREND": factors.append("Downtrend")
 
     return {"score": score, "label": label, "color": color, "factors": factors}
+
+
+def calc_fixable_orders(pos, md):
+    """Determine which unpriced orders are fixable now based on exchange hours."""
+    if not pos or not md:
+        return None
+    shipped = pos.get("sales_unpriced_shipped", [])
+    unshipped = pos.get("sales_unpriced_unshipped", [])
+    all_unpriced = shipped + unshipped
+    if not all_unpriced:
+        return None
+
+    lme = md.get("lme", {})
+    lme_open = lme.get("status") in ("OPEN", "RING") if lme else False
+    # COMEX electronic is essentially 23h/day Sun-Fri, assume open if market data exists
+    comex_open = md.get("price") is not None
+
+    fixable = 0; fixable_lbs = 0; blocked_lme = 0; blocked_lme_lbs = 0
+    shipped_fixable = []
+    for sale in all_unpriced:
+        basis = sale.get("basis", "COMEX")
+        lbs = sale.get("open_lbs", sale.get("lbs", 0))
+        if basis == "LME" and not lme_open:
+            blocked_lme += 1; blocked_lme_lbs += lbs
+        else:
+            fixable += 1; fixable_lbs += lbs
+            if sale in shipped:
+                shipped_fixable.append(sale)
+
+    return {
+        "fixable_count": fixable, "fixable_lbs": round(fixable_lbs),
+        "blocked_lme_count": blocked_lme, "blocked_lme_lbs": round(blocked_lme_lbs),
+        "total_unpriced": len(all_unpriced),
+        "shipped_fixable": shipped_fixable,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -625,22 +886,36 @@ def get_contract_roll(copper_price=None):
         result["next_month"] = {"label": next_mo["label"], "ticker": next_mo["ticker"], "fnd": next_mo["fnd_str"]}
     if copper_price is not None:
         result["front_price"] = round(copper_price, 4)
+    else:
+        # Fetch front month price from yfinance (needed when RT source is next month)
+        try:
+            import yfinance as yf
+            t = yf.Ticker(front["yf_ticker"])
+            h = t.history(period="1d", interval="5m")
+            if h.empty:
+                h = t.history(period="5d")
+            if not h.empty:
+                h = h.reset_index()
+                h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+                result["front_price"] = round(float(h.iloc[-1]["Close"]), 4)
+                print(f"[INFO] Front month {front['ticker']} (yf): ${result['front_price']:.4f}")
+        except Exception as e:
+            print(f"[WARN] Front month price error: {e}")
 
     # Fetch next month contract price for calendar spread
     if next_mo:
         try:
             import yfinance as yf
-            for fmt in [next_mo["yf_ticker"]]:
-                try:
-                    t = yf.Ticker(fmt)
-                    h = t.history(period="5d")
-                    if not h.empty:
-                        h = h.reset_index()
-                        h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
-                        result["next_price"] = round(float(h.iloc[-1]["Close"]), 4)
-                        print(f"[INFO] Next month {next_mo['ticker']}: ${result['next_price']:.4f}")
-                        break
-                except: continue
+            t = yf.Ticker(next_mo["yf_ticker"])
+            # Try intraday first for most current price
+            h = t.history(period="1d", interval="5m")
+            if h.empty:
+                h = t.history(period="5d")  # fallback to daily
+            if not h.empty:
+                h = h.reset_index()
+                h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+                result["next_price"] = round(float(h.iloc[-1]["Close"]), 4)
+                print(f"[INFO] Next month {next_mo['ticker']}: ${result['next_price']:.4f}")
         except Exception as e:
             print(f"[WARN] Next month price error: {e}")
 
@@ -1008,6 +1283,18 @@ def fetch_copper_data():
         change = price - prev_close
         change_pct = (change / prev_close) * 100 if prev_close else 0
 
+        # Determine previous settlement for RT overlay
+        # If daily data includes today (partial bar), prev settle = closes[-2]
+        # If daily data ends yesterday, prev settle = closes[-1]
+        today_date = datetime.now().date()
+        last_ohlc_date = dates[-1].date() if hasattr(dates[-1], 'date') else dates[-1]
+        if isinstance(last_ohlc_date, datetime):
+            last_ohlc_date = last_ohlc_date.date()
+        if last_ohlc_date >= today_date and n_closes > 1:
+            _daily_prev_settle = closes[-2]
+        else:
+            _daily_prev_settle = closes[-1]
+
         ma50 = sum(closes[-50:]) / min(n_closes, 50)
         ma100 = sum(closes[-100:]) / min(n_closes, 100)
         ma200 = sum(closes[-200:]) / min(n_closes, 200)
@@ -1074,6 +1361,7 @@ def fetch_copper_data():
 
         dxy = fetch_dxy()
         china = get_china_status()
+        lme_status = get_lme_status()
         fed = fetch_fed_data()
         warehouse = get_warehouse_data()
 
@@ -1093,8 +1381,9 @@ def fetch_copper_data():
             "range_90d": [round(range_90d_low, 4), round(range_90d_high, 4)],
             "roc": roc, "streak": streak, "streak_dir": streak_dir,
             "avg_daily_range": avg_daily_range, "vol_vs_avg": vol_vs_avg,
-            "support_resistance": sr, "dxy": dxy, "china": china,
+            "support_resistance": sr, "dxy": dxy, "china": china, "lme": lme_status,
             "fed": fed, "warehouse": warehouse,
+            "_daily_prev_settle": round(_daily_prev_settle, 4),
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         _copper_cache = {"data": result, "timestamp": time.time()}
@@ -1511,6 +1800,21 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             md = fetch_copper_data()
+            # Overlay real-time price on top of cached daily OHLC
+            rt = _fetch_realtime_price()
+            if rt.get("price") and md:
+                md = dict(md)  # copy so we don't mutate the cache
+                prev = rt.get("prev_close") or md.get("_daily_prev_settle", md["prev_close"])
+                md["price"] = rt["price"]
+                md["prev_close"] = prev
+                md["change"] = round(rt["price"] - prev, 4)
+                md["change_pct"] = round(((rt["price"] - prev) / prev) * 100, 2) if prev else 0
+                md["copper_source"] = rt.get("source", md.get("copper_source", ""))
+                # Tell frontend which contract the big price represents
+                md["active_contract"] = rt.get("active_contract", "front")
+                # Recalculate COMEX-LME spread with RT price
+                if md.get("lme_price_lb"):
+                    md["comex_lme_spread"] = round(rt["price"] - md["lme_price_lb"], 4)
             sig = compute_signals(md)
             pos = load_position()
             risk = calc_risk(pos, md)
@@ -1518,13 +1822,26 @@ class Handler(SimpleHTTPRequestHandler):
                 risk["baseline_lbs"] = CFG["BASELINE_LBS"]
                 risk["baseline_deviation"] = risk["net_lbs"] - CFG["BASELINE_LBS"]
             fix_window = calc_fix_window(md, sig)
-            roll = get_contract_roll(md.get("price") if md else None)
+            # When RT source is the next month (e.g. investing.com → May),
+            # pass None as copper_price so contract_roll fetches front independently.
+            # Then we override the spread with the correct direction.
+            _ac = md.get("active_contract", "front") if md else "front"
+            roll = get_contract_roll(md.get("price") if (_ac == "front" and md) else None)
+            if roll and _ac == "next" and md:
+                # Big price is May (next). Use it as next_price, fetch front separately.
+                roll["next_price"] = md["price"]
+                if roll.get("front_price"):
+                    spread = round(md["price"] - roll["front_price"], 4)
+                    roll["calendar_spread"] = spread
+                    roll["market_structure"] = "contango" if spread > 0.001 else "backwardation" if spread < -0.001 else "flat"
             dec = gen_decisions(sig, risk, md, fix_window, roll)
             gtc = gen_gtc(pos, md)
             margin = calc_margin_projection(pos, md, risk)
+            fixable = calc_fixable_orders(pos, md)
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
+                "fixable_orders": fixable,
                 "margin_projection": margin, "contract_roll": roll,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

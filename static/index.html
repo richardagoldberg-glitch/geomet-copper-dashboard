@@ -120,6 +120,20 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .fw-fill{height:100%;border-radius:4px;transition:width .5s}
 .fw-factors{display:flex;flex-wrap:wrap;gap:4px}
 .fw-tag{font-size:9px;padding:2px 6px;border-radius:3px;background:var(--sf);color:var(--tm);border:1px solid var(--bd)}
+.so-section{margin-top:8px;padding:6px 0;border-top:1px solid var(--bd)}
+.so-hdr{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1px;margin-bottom:5px;padding:0 2px}
+.so-hdr.ship{color:var(--r)}.so-hdr.unship{color:var(--p)}
+.so-scroll{max-height:240px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd) transparent}
+.so-scroll::-webkit-scrollbar{width:4px}.so-scroll::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+.so-row{display:flex;align-items:center;gap:4px;padding:5px 8px;background:var(--sf2);border-radius:4px;margin-bottom:3px;font-size:10px;border-left:3px solid transparent;min-width:0}
+.so-row.shipped{border-left-color:var(--r);background:rgba(255,71,87,.06)}.so-row.unshipped{border-left-color:var(--p);background:rgba(167,139,250,.06)}
+.so-cust{flex:1;color:var(--tx);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.so-comm{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tm);width:40px;text-align:center;flex-shrink:0}
+.so-lbs{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;width:52px;text-align:right;flex-shrink:0}
+.so-basis{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;letter-spacing:.5px;flex-shrink:0;white-space:nowrap}
+.so-basis.comex{background:var(--cg);color:var(--cu)}.so-basis.lme{background:var(--bdd);color:var(--b)}
+.fw-context{padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;font-size:10px;color:var(--tm)}
+.fw-nudge{padding:8px 10px;background:rgba(0,229,155,.08);border:1px dashed rgba(0,229,155,.3);border-radius:4px;margin-top:6px;font-size:10px;color:var(--g);font-weight:500}
 @media(max-width:1400px){.db{grid-template-columns:1fr 1fr 1fr}.s2{grid-column:span 1}}
 @media(max-width:1000px){.db{grid-template-columns:1fr 1fr}}
 @media(max-width:700px){.db{grid-template-columns:1fr}.pv{font-size:28px}}
@@ -134,7 +148,7 @@ body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--t
 </head>
 <body>
 <div class="hdr"><div class="hdr-l"><div class="logo">GEOMET</div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
-<div class="hdr-r"><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
+<div class="hdr-r"><div id="lme" class="ch-badge closed"></div><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
 <div class="db" id="db"><div class="ld"><div class="ls"></div>Fetching copper data...</div></div>
 <script>
 function applyTheme(t){if(t==='light')document.body.classList.add('light');else document.body.classList.remove('light');var b=document.getElementById('thm');if(b)b.textContent=t==='light'?'\u2600\uFE0F':'\uD83C\uDF19'}
@@ -145,26 +159,47 @@ function n(v){return v?Number(v).toLocaleString():'0'}
 function $(id){return document.getElementById(id)}
 async function fd(){try{var r=await fetch('/api/data');var d=await r.json();render(d);$('sd').style.background='var(--g)'}catch(e){$('sd').style.background='var(--r)';$('ri').textContent='Connection error'}}
 function render(d){
-var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=d.gtc_suggestions||[],cfg=d.config||{},fw=d.fix_window;
+var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=d.gtc_suggestions||[],cfg=d.config||{},fw=d.fix_window,fo=d.fixable_orders;
 $('ri').textContent='Updated '+d.last_refresh;
 if(pos&&pos.source_file)$('si').textContent='Source: '+pos.source_file;
 if(m&&m.china){var ch=m.china,chc=ch.status==='OPEN'?'open':ch.thin_liquidity?'warn':'closed';
 $('ch').className='ch-badge '+chc;$('ch').textContent=ch.status==='OPEN'?'SHFE OPEN':ch.detail;}
+if(m&&m.lme){var lm=m.lme,lmc=lm.status==='CLOSED'?'warn':lm.session==='ring'?'open':'open';
+$('lme').className='ch-badge '+lmc;$('lme').textContent=lm.detail;
+if(lm.session==='ring')$('lme').style.fontWeight='800';else $('lme').style.fontWeight='';}
 if(!m||!s){$('db').innerHTML='<div class="ld">Unable to fetch data.</div>';return}
-var cc=m.change>=0?'up':'dn',cs=m.change>=0?'+':'',h='';
-// Price + LME + DXY + Fed + Warehouse
-h+='<div class="pn pp"><div class="pl">COMEX Copper (HG)</div><div class="pm"><div class="pv">'+m.price.toFixed(4)+'</div><div class="pu">$/lb</div>';
+var cc=m.change>=0?'up':'dn',cs=m.change>=0?'+':'',h='',cr=d.contract_roll;
+var ac=m.active_contract||'front'; // which contract the big price represents
+// COMEX Price Panel — consolidated prices
+// Show the active contract ticker in the header
+var acLabel='HG';
+if(cr){if(ac==='next'&&cr.next_month)acLabel=cr.next_month.ticker+' ('+cr.next_month.label+')';
+else acLabel=cr.front_month.ticker+' ('+cr.front_month.label+')';}
+h+='<div class="pn pp"><div class="pl">COMEX Copper \u2014 '+acLabel+'</div><div class="pm"><div class="pv">'+m.price.toFixed(4)+'</div><div class="pu">$/lb</div>';
 h+='<div class="pc '+cc+'">'+cs+m.change.toFixed(4)+' ('+cs+m.change_pct.toFixed(2)+'%)</div></div>';
-h+='<div class="ps">Prev settle: '+m.prev_close.toFixed(4)+'</div>';
+h+='<div class="ps">Prev settle: '+m.prev_close.toFixed(4)+(m.copper_source?' <span style="font-size:8px;color:var(--td)">via '+m.copper_source+'</span>':'')+'</div>';
+// Contract info — highlight which contract is active with an arrow
+if(cr){var fm=cr.front_month,nm=cr.next_month;
+var fAct=ac==='front',nAct=ac==='next';
+h+='<div class="lr"><span class="ll">'+(fAct?'\u25B6 ':'')+'Front</span><span class="lv" style="color:var(--cu)'+(fAct?';font-weight:700':'')+'">'+fm.ticker+' ('+fm.label+')'+(fAct?' \u2190 shown':'')+'</span></div>';
+if(nm){h+='<div class="lr"><span class="ll">'+(nAct?'\u25B6 ':'')+'Next</span><span class="lv" style="color:var(--b)'+(nAct?';font-weight:700':'')+'">'+nm.ticker+' ('+nm.label+') '+(cr.next_price&&!nAct?'$'+cr.next_price.toFixed(4):nAct?'\u2190 shown':'\u2014')+'</span></div>';}
+if(cr.calendar_spread!==undefined&&cr.calendar_spread!==null){var ms=cr.market_structure;
+var sclr=ms==='contango'?'var(--y)':ms==='backwardation'?'var(--b)':'var(--tm)';
+var slbl=ms==='contango'?'CONTANGO':ms==='backwardation'?'BACKWARDATION':'FLAT';
+h+='<div class="lr"><span class="ll">Spread</span><span class="lv" style="color:'+sclr+'">'+(cr.calendar_spread>=0?'+':'')+cr.calendar_spread.toFixed(4)+' <span style="font-size:9px;font-weight:600;letter-spacing:1px">'+slbl+'</span></span></div>';}}
+// LME section
+h+='<div style="border-top:1px solid var(--bd);margin:8px 0"></div>';
 if(m.lme_price_lb){
 h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+m.lme_price_lb.toFixed(4)+'/lb';
 if(m.lme_change!==null&&m.lme_change!==undefined){var lcc=m.lme_change>=0?'up':'dn',lcs=m.lme_change>=0?'+':'';h+=' <span class="pc '+lcc+'" style="font-size:9px;padding:1px 4px;margin-left:4px">'+lcs+m.lme_change.toFixed(4)+' ('+lcs+m.lme_change_pct.toFixed(2)+'%)</span>';}
 h+='</span></div>';
 if(m.lme_price_mt)h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+n(Math.round(m.lme_price_mt))+'/MT</span></div>';
 if(m.comex_lme_spread!==null&&m.comex_lme_spread!==undefined){var spc=m.comex_lme_spread>=0?'var(--g)':'var(--b)';
-h+='<div class="lr"><span class="ll">COMEX-LME Spread</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb</span></div>';}
+h+='<div class="lr"><span class="ll">COMEX-LME</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb</span></div>';}
 h+='<div style="text-align:right;font-size:8px;color:var(--td);margin-top:3px">via '+m.lme_source+'</div>';
 }else{h+='<div class="lr"><span class="ll">LME</span><span style="font-size:9px;color:var(--r)">Not configured</span></div>';}
+// Macro section
+h+='<div style="border-top:1px solid var(--bd);margin:8px 0"></div>';
 if(m.dxy&&m.dxy.price){var dx=m.dxy,dcl=dx.change>=0?'var(--r)':'var(--g)';
 h+='<div class="dxy-box"><span class="dxy-label">DXY</span><span class="dxy-val">'+dx.price.toFixed(2)+'</span>';
 h+='<span class="dxy-chg" style="color:'+dcl+';background:'+(dx.change>=0?'var(--rd)':'var(--gd)')+'">'+(dx.change>=0?'+':'')+dx.change.toFixed(2)+'</span></div>';}
@@ -226,6 +261,11 @@ h+='<div class="fw-bar"><div class="fw-fill" style="width:'+fw.score+'%;backgrou
 h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+fwc+';margin-bottom:4px">'+fw.label+'</div>';
 if(fw.factors&&fw.factors.length){h+='<div class="fw-factors">';fw.factors.forEach(function(f){h+='<span class="fw-tag">'+f+'</span>';});h+='</div>';}
 h+='</div>';}
+if(fo){var fctx=fo.fixable_count+' order'+(fo.fixable_count!==1?'s':'')+' fixable now';
+if(fo.blocked_lme_count>0)fctx+=' ('+fo.blocked_lme_count+' awaiting LME)';
+h+='<div class="fw-context">'+fctx+'</div>';
+if(fw&&fw.score>=65&&fo.shipped_fixable&&fo.shipped_fixable.length>0){var top=fo.shipped_fixable[0];
+h+='<div class="fw-nudge">'+n(Math.round(top.open_lbs||top.lbs))+' lbs shipped to '+top.consumer+' \u2014 fix now?</div>';}}
 h+='<div class="sb '+s.signal_color+'">'+s.signal+'</div>';
 h+='<div class="sdt">'+s.signal_detail+'</div><div style="font-size:10px;color:var(--td);margin-top:5px">'+s.move_desc+'</div>';
 if(s.momentum_note)h+='<div style="font-size:10px;color:var(--p);margin-top:6px">'+s.momentum_note+'</div>';
@@ -274,18 +314,31 @@ h+='<div style="display:flex;justify-content:space-between;align-items:center;pa
 if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">As of: '+pos.updated+'</div>';
 }else h+='<div class="nd">Drop Hedge xlsx into data/</div>';
 h+='</div>';
-// Sales
-h+='<div class="pn slp"><div class="pl">Sales Breakdown</div>';
+// Sales Orders
+h+='<div class="pn slp"><div class="pl">Sales Orders</div>';
 if(r&&(r.priced_sales_lbs>0||r.unpriced_sales_lbs>0)){
 var tt=r.priced_sales_lbs+r.unpriced_sales_lbs,pp=tt>0?(r.priced_sales_lbs/tt*100):0;
 h+='<div class="sbar"><div class="sbp" style="width:'+pp+'%"></div><div class="sbu" style="width:'+(100-pp)+'%"></div></div>';
 h+='<div class="slg"><div class="sli"><div class="sld" style="background:var(--g)"></div>Priced '+n(Math.round(r.priced_sales_lbs))+' lbs ('+pp.toFixed(0)+'%)</div>';
 h+='<div class="sli"><div class="sld" style="background:var(--p)"></div>Unpriced '+n(Math.round(r.unpriced_sales_lbs))+' lbs ('+(100-pp).toFixed(0)+'%)</div></div>';
+var shipd=pos?pos.sales_unpriced_shipped:[];
+var unshipd=pos?pos.sales_unpriced_unshipped:[];
+function soGrade(raw){var c=(raw||'').toUpperCase().replace(/\s*\(.*\)/,'');
+if(/CHOP/.test(c))return'Chops';if(/CUBB/.test(c))return'BB';if(/CU1/.test(c))return'#1';if(/CU2/.test(c))return'#2';return c.replace(/^CU/,'');}
+if(shipd&&shipd.length>0){h+='<div class="so-section"><div class="so-hdr ship">\u26A0 SHIPPED \u2014 FIX PRIORITY</div>';
+shipd.forEach(function(so){
+h+='<div class="so-row shipped"><span class="so-cust">'+so.consumer+'</span><span class="so-comm">'+soGrade(so.commodity)+'</span><span class="so-lbs">'+n(Math.round(so.open_lbs||so.lbs))+'</span><span class="so-basis '+(so.basis||'COMEX').toLowerCase()+'">'+(so.basis||'COMEX')+'</span></div>';});
+h+='</div>';}
+if(unshipd&&unshipd.length>0){h+='<div class="so-section"><div class="so-hdr unship">UNSHIPPED \u2014 OPEN</div><div class="so-scroll">';
+unshipd.forEach(function(so){
+h+='<div class="so-row unshipped"><span class="so-cust">'+so.consumer+'</span><span class="so-comm">'+soGrade(so.commodity)+'</span><span class="so-lbs">'+n(Math.round(so.open_lbs||so.lbs))+'</span><span class="so-basis '+(so.basis||'COMEX').toLowerCase()+'">'+(so.basis||'COMEX')+'</span></div>';});
+h+='</div></div>';}
+if((!shipd||shipd.length===0)&&(!unshipd||unshipd.length===0)){
 h+='<div style="margin-top:2px">';
 if(r.sales_unpriced_shipped_lbs>0)h+='<div class="cat-row hot"><span class="cat-label">\u26A0 Unpriced / Shipped</span><span class="cat-val hot">'+n(Math.round(r.sales_unpriced_shipped_lbs))+' lbs</span></div>';
 h+='<div class="cat-row ok"><span class="cat-label">Priced / Unshipped</span><span class="cat-val ok">'+n(Math.round(r.sales_priced_unshipped_lbs))+' lbs</span></div>';
 h+='<div class="cat-row chill"><span class="cat-label">Unpriced / Unshipped</span><span class="cat-val chill">'+n(Math.round(r.sales_unpriced_unshipped_lbs))+' lbs</span></div>';
-h+='</div>';
+h+='</div>';}
 if(r.priced_sales_avg>0)h+='<div class="rs" style="margin-top:6px"><span class="rsl">Avg priced</span><span class="rsv">$'+r.priced_sales_avg.toFixed(4)+'</span></div>';
 }else h+='<div class="nd">No sales data</div>';
 h+='</div>';
@@ -347,25 +400,16 @@ h+='<div class="rs"><span class="rsl">Per 10c move</span><span class="rsv" style
 }else h+='<div class="nd">Load position to see risk</div>';
 h+='</div>';
 h+='</div>';
-// Contract Roll
+// Contract Roll — FND + OI only (prices consolidated in COMEX panel)
 h+='<div class="pn rlp"><div class="pl">Contract Roll</div>';
-if(d.contract_roll){var cr=d.contract_roll,fm=cr.front_month,nm=cr.next_month;
-var rlc=cr.roll_color==='red'?'var(--r)':cr.roll_color==='orange'?'var(--o)':cr.roll_color==='yellow'?'var(--y)':'var(--g)';
-h+='<div class="ctx-row"><span class="ctx-l">Front Month</span><span class="ctx-v" style="color:var(--cu)">'+fm.ticker+'</span></div>';
-h+='<div class="ctx-row"><span class="ctx-l">'+fm.label+'</span><span class="ctx-v">'+(cr.front_price?'$'+cr.front_price.toFixed(4):'\u2014')+'</span></div>';
-if(nm){h+='<div class="ctx-row" style="margin-top:6px"><span class="ctx-l">Next Month</span><span class="ctx-v" style="color:var(--b)">'+nm.ticker+'</span></div>';
-h+='<div class="ctx-row"><span class="ctx-l">'+nm.label+'</span><span class="ctx-v">'+(cr.next_price?'$'+cr.next_price.toFixed(4):'\u2014')+'</span></div>';}
-if(cr.calendar_spread!==undefined&&cr.calendar_spread!==null){var ms=cr.market_structure;
-var sclr=ms==='contango'?'var(--y)':ms==='backwardation'?'var(--b)':'var(--tm)';
-var slbl=ms==='contango'?'CONTANGO':ms==='backwardation'?'BACKWARDATION':'FLAT';
-h+='<div style="margin-top:8px;padding:8px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid '+sclr+'"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:var(--tm)">Calendar Spread</span><span style="font-family:JetBrains Mono,monospace;font-size:12px;font-weight:600;color:'+sclr+'">'+(cr.calendar_spread>=0?'+':'')+cr.calendar_spread.toFixed(4)+'</span></div>';
-h+='<div style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:600;letter-spacing:1px;color:'+sclr+';margin-top:3px">'+slbl+'</div></div>';}
-h+='<div style="margin-top:8px;padding:8px 10px;background:'+(cr.roll_color==='green'?'var(--gd)':cr.roll_color==='yellow'?'var(--yd)':cr.roll_color==='orange'?'var(--od)':'var(--rd)')+';border-radius:4px;border-left:3px solid '+rlc+'">';
-h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+rlc+'">'+cr.roll_status+'</div>';
-h+='<div style="font-size:9px;color:var(--tm);margin-top:2px">'+fm.ticker+' FND: '+fm.fnd+'</div></div>';
-if(cr.roll_urgency==='critical'||cr.roll_urgency==='warning'){
-h+='<div style="margin-top:6px;padding:6px 10px;background:var(--rd);border-radius:4px;font-size:10px;color:var(--r)">\u26A0 Liquidity migrating to '+(nm?nm.ticker:'next contract')+' \u2014 check execution quality</div>';}
-if(cr.open_interest){var oi=cr.open_interest;
+if(d.contract_roll){var crl=d.contract_roll,fml=crl.front_month,nml=crl.next_month;
+var rlc=crl.roll_color==='red'?'var(--r)':crl.roll_color==='orange'?'var(--o)':crl.roll_color==='yellow'?'var(--y)':'var(--g)';
+h+='<div style="padding:8px 10px;background:'+(crl.roll_color==='green'?'var(--gd)':crl.roll_color==='yellow'?'var(--yd)':crl.roll_color==='orange'?'var(--od)':'var(--rd)')+';border-radius:4px;border-left:3px solid '+rlc+'">';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+rlc+'">'+crl.roll_status+'</div>';
+h+='<div style="font-size:9px;color:var(--tm);margin-top:2px">'+fml.ticker+' FND: '+fml.fnd+'</div></div>';
+if(crl.roll_urgency==='critical'||crl.roll_urgency==='warning'){
+h+='<div style="margin-top:6px;padding:6px 10px;background:var(--rd);border-radius:4px;font-size:10px;color:var(--r)">\u26A0 Liquidity migrating to '+(nml?nml.ticker:'next contract')+' \u2014 check execution quality</div>';}
+if(crl.open_interest){var oi=crl.open_interest;
 h+='<div style="margin-top:10px;border-top:1px solid var(--bd);padding-top:8px">';
 h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Open Interest</div>';
 h+='<div class="ctx-row"><span class="ctx-l">Total OI</span><span class="ctx-v">'+n(oi.total)+' contracts</span></div>';
