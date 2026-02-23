@@ -4,7 +4,7 @@ Geomet Recycling - Copper Intelligence Dashboard v4.1
 Fix Window, Fed Funds, Warehouse Stocks, Price Context, DXY, S/R
 """
 
-import json, os, csv, glob, re, time, hashlib, secrets
+import json, os, csv, glob, re, time, hashlib, secrets, calendar
 from datetime import datetime, timedelta
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -516,6 +516,191 @@ def get_warehouse_data():
         "trend": CFG.get("COMEX_WAREHOUSE_TREND", ""),
         "source": "config",
     }
+
+
+# ---------------------------------------------------------------------------
+# CONTRACT ROLL + OPEN INTEREST
+# ---------------------------------------------------------------------------
+_roll_cache = {"data": None, "timestamp": 0}
+OI_HISTORY = DATA_DIR / "oi_history.json"
+
+def get_contract_roll(copper_price=None):
+    """COMEX copper contract roll status, calendar spread, and open interest."""
+    global _roll_cache
+    now = time.time()
+    if _roll_cache["data"] and (now - _roll_cache["timestamp"]) < 300:
+        cached = _roll_cache["data"].copy()
+        if copper_price is not None:
+            cached["front_price"] = round(copper_price, 4)
+            if cached.get("next_price"):
+                spread = round(cached["next_price"] - copper_price, 4)
+                cached["calendar_spread"] = spread
+                cached["market_structure"] = "contango" if spread > 0.001 else "backwardation" if spread < -0.001 else "flat"
+        return cached
+
+    today = datetime.now().date()
+
+    # COMEX copper active months: H=Mar, K=May, N=Jul, U=Sep, Z=Dec
+    MONTHS = [
+        ("H", "Mar", 3, 2),
+        ("K", "May", 5, 4),
+        ("N", "Jul", 7, 6),
+        ("U", "Sep", 9, 8),
+        ("Z", "Dec", 12, 11),
+    ]
+
+    def last_biz_day(year, month):
+        last = calendar.monthrange(year, month)[1]
+        d = datetime(year, month, last).date()
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+        return d
+
+    def trading_days_until(target):
+        if today >= target:
+            return 0
+        count = 0
+        d = today + timedelta(days=1)
+        while d <= target:
+            if d.weekday() < 5:
+                count += 1
+            d += timedelta(days=1)
+        return count
+
+    contracts = []
+    for year in [today.year, today.year + 1]:
+        for code, label, del_mo, notice_mo in MONTHS:
+            fnd = last_biz_day(year, notice_mo)
+            yy = str(year)[-2:]
+            contracts.append({
+                "code": code, "label": f"{label} {yy}",
+                "ticker": f"HG{code}{yy}",
+                "yf_ticker": f"HG{code}{yy}.CMX",
+                "fnd": fnd, "fnd_str": fnd.strftime("%b %d"),
+                "year": year,
+            })
+    contracts.sort(key=lambda c: c["fnd"])
+
+    front = None; next_mo = None
+    for i, c in enumerate(contracts):
+        if c["fnd"] >= today:
+            front = c
+            if i + 1 < len(contracts):
+                next_mo = contracts[i + 1]
+            break
+    if not front:
+        return None
+
+    days_to_fnd = trading_days_until(front["fnd"])
+
+    if today == front["fnd"]:
+        roll_status = "FIRST NOTICE DAY"
+        roll_urgency = "critical"
+        roll_color = "red"
+    elif days_to_fnd <= 2:
+        roll_status = f"{days_to_fnd} trading day{'s' if days_to_fnd != 1 else ''} to FND"
+        roll_urgency = "critical"
+        roll_color = "red"
+    elif days_to_fnd <= 5:
+        roll_status = f"{days_to_fnd} trading days to FND"
+        roll_urgency = "warning"
+        roll_color = "orange"
+    elif days_to_fnd <= 10:
+        roll_status = f"{days_to_fnd} trading days to FND"
+        roll_urgency = "attention"
+        roll_color = "yellow"
+    else:
+        roll_status = f"{days_to_fnd} trading days to FND"
+        roll_urgency = "normal"
+        roll_color = "green"
+
+    result = {
+        "front_month": {"label": front["label"], "ticker": front["ticker"], "fnd": front["fnd_str"]},
+        "days_to_fnd": days_to_fnd,
+        "roll_status": roll_status,
+        "roll_urgency": roll_urgency,
+        "roll_color": roll_color,
+    }
+    if next_mo:
+        result["next_month"] = {"label": next_mo["label"], "ticker": next_mo["ticker"], "fnd": next_mo["fnd_str"]}
+    if copper_price is not None:
+        result["front_price"] = round(copper_price, 4)
+
+    # Fetch next month contract price for calendar spread
+    if next_mo:
+        try:
+            import yfinance as yf
+            for fmt in [next_mo["yf_ticker"]]:
+                try:
+                    t = yf.Ticker(fmt)
+                    h = t.history(period="5d")
+                    if not h.empty:
+                        h = h.reset_index()
+                        h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+                        result["next_price"] = round(float(h.iloc[-1]["Close"]), 4)
+                        print(f"[INFO] Next month {next_mo['ticker']}: ${result['next_price']:.4f}")
+                        break
+                except: continue
+        except Exception as e:
+            print(f"[WARN] Next month price error: {e}")
+
+    # Calendar spread
+    if copper_price and result.get("next_price"):
+        spread = round(result["next_price"] - copper_price, 4)
+        result["calendar_spread"] = spread
+        result["market_structure"] = "contango" if spread > 0.001 else "backwardation" if spread < -0.001 else "flat"
+
+    # Open interest
+    try:
+        import yfinance as yf
+        t = yf.Ticker("HG=F")
+        info = t.info or {}
+        oi = info.get("openInterest")
+        if oi and oi > 0:
+            oi_history = _save_oi(oi)
+            oi_data = {"total": oi, "source": "yfinance"}
+            trend = _compute_oi_trend(oi_history, oi)
+            if trend:
+                oi_data.update(trend)
+            result["open_interest"] = oi_data
+            print(f"[INFO] Open interest: {oi:,} contracts")
+    except Exception as e:
+        print(f"[WARN] Open interest error: {e}")
+
+    _roll_cache = {"data": result, "timestamp": now}
+    return result
+
+
+def _save_oi(oi):
+    try:
+        history = []
+        if OI_HISTORY.exists():
+            with open(OI_HISTORY) as f:
+                history = json.load(f)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if history and history[-1].get("date") == today_str:
+            history[-1] = {"date": today_str, "oi": oi}
+        else:
+            history.append({"date": today_str, "oi": oi})
+        history = history[-30:]
+        with open(OI_HISTORY, "w") as f:
+            json.dump(history, f)
+        return history
+    except:
+        return []
+
+
+def _compute_oi_trend(history, current_oi):
+    if not history or len(history) < 2:
+        return None
+    recent = history[-5:] if len(history) >= 5 else history
+    first_oi = recent[0]["oi"]
+    if first_oi <= 0:
+        return None
+    change = current_oi - first_oi
+    change_pct = round((change / first_oi) * 100, 1)
+    trend = "building" if change > 0 else "declining" if change < 0 else "stable"
+    return {"trend": trend, "change_5d": change, "change_5d_pct": change_pct, "history_days": len(history)}
 
 
 # ---------------------------------------------------------------------------
@@ -1120,7 +1305,7 @@ def calc_margin_projection(pos, md, risk):
     }
 
 
-def gen_decisions(sig, risk, md, fix_window):
+def gen_decisions(sig, risk, md, fix_window, roll=None):
     dec = []
     if not sig: return ["Unable to fetch market data"]
     p = md["price"] if md else 0; ft = CFG["FIX_TARGET"]
@@ -1183,6 +1368,11 @@ def gen_decisions(sig, risk, md, fix_window):
     if wh and wh.get("mt"):
         arrow = "\u2191" if wh["trend"] == "building" else "\u2193" if wh["trend"] == "drawing" else "\u2192"
         dec.append(f"COMEX warehouse: {wh['mt']:,} MT {arrow} ({wh.get('date','')}) \u2014 {'bearish overhang' if wh['trend']=='building' else 'supply tightening' if wh['trend']=='drawing' else 'stable'}")
+
+    # Contract roll alert
+    if roll and roll.get("roll_urgency") in ("critical", "warning"):
+        nm_ticker = roll.get("next_month", {}).get("ticker", "next contract")
+        dec.append(f"\u26A0 {roll['front_month']['ticker']}: {roll['roll_status']} \u2014 liquidity migrating to {nm_ticker}")
 
     if sig.get("momentum_note"): dec.append(sig["momentum_note"])
 
@@ -1328,13 +1518,14 @@ class Handler(SimpleHTTPRequestHandler):
                 risk["baseline_lbs"] = CFG["BASELINE_LBS"]
                 risk["baseline_deviation"] = risk["net_lbs"] - CFG["BASELINE_LBS"]
             fix_window = calc_fix_window(md, sig)
-            dec = gen_decisions(sig, risk, md, fix_window)
+            roll = get_contract_roll(md.get("price") if md else None)
+            dec = gen_decisions(sig, risk, md, fix_window, roll)
             gtc = gen_gtc(pos, md)
             margin = calc_margin_projection(pos, md, risk)
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
-                "margin_projection": margin,
+                "margin_projection": margin, "contract_roll": roll,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }

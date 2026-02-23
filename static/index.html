@@ -30,7 +30,7 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .pp .pl::before{background:var(--cu)}.tp .pl::before{background:var(--b)}.sp .pl::before{background:var(--y)}
 .gp .pl::before{background:var(--cu)}.posp .pl::before{background:var(--g)}.slp .pl::before{background:var(--p)}.sap .pl::before{background:var(--b)}
 .mgp .pl::before{background:var(--cu)}
-.rp .pl::before{background:var(--r)}.dp .pl::before{background:var(--o)}.cp .pl::before{background:var(--p)}.fwp .pl::before{background:var(--g)}
+.rp .pl::before{background:var(--r)}.dp .pl::before{background:var(--o)}.cp .pl::before{background:var(--p)}.fwp .pl::before{background:var(--g)}.rlp .pl::before{background:var(--o)}
 .pm{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
 .pv{font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:700;line-height:1;letter-spacing:-1px}
 .pu{font-size:11px;color:var(--td)}
@@ -346,6 +346,35 @@ h+='<div class="rs"><span class="rsl">Per 1c move</span><span class="rsv">$'+n(M
 h+='<div class="rs"><span class="rsl">Per 10c move</span><span class="rsv" style="color:'+(Math.abs(r.risk_per_dime)>10000?'var(--r)':'var(--tx)')+'">$'+n(Math.round(Math.abs(r.risk_per_dime)))+'</span></div>';
 }else h+='<div class="nd">Load position to see risk</div>';
 h+='</div>';
+h+='</div>';
+// Contract Roll
+h+='<div class="pn rlp"><div class="pl">Contract Roll</div>';
+if(d.contract_roll){var cr=d.contract_roll,fm=cr.front_month,nm=cr.next_month;
+var rlc=cr.roll_color==='red'?'var(--r)':cr.roll_color==='orange'?'var(--o)':cr.roll_color==='yellow'?'var(--y)':'var(--g)';
+h+='<div class="ctx-row"><span class="ctx-l">Front Month</span><span class="ctx-v" style="color:var(--cu)">'+fm.ticker+'</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">'+fm.label+'</span><span class="ctx-v">'+(cr.front_price?'$'+cr.front_price.toFixed(4):'\u2014')+'</span></div>';
+if(nm){h+='<div class="ctx-row" style="margin-top:6px"><span class="ctx-l">Next Month</span><span class="ctx-v" style="color:var(--b)">'+nm.ticker+'</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">'+nm.label+'</span><span class="ctx-v">'+(cr.next_price?'$'+cr.next_price.toFixed(4):'\u2014')+'</span></div>';}
+if(cr.calendar_spread!==undefined&&cr.calendar_spread!==null){var ms=cr.market_structure;
+var sclr=ms==='contango'?'var(--y)':ms==='backwardation'?'var(--b)':'var(--tm)';
+var slbl=ms==='contango'?'CONTANGO':ms==='backwardation'?'BACKWARDATION':'FLAT';
+h+='<div style="margin-top:8px;padding:8px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid '+sclr+'"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:var(--tm)">Calendar Spread</span><span style="font-family:JetBrains Mono,monospace;font-size:12px;font-weight:600;color:'+sclr+'">'+(cr.calendar_spread>=0?'+':'')+cr.calendar_spread.toFixed(4)+'</span></div>';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:600;letter-spacing:1px;color:'+sclr+';margin-top:3px">'+slbl+'</div></div>';}
+h+='<div style="margin-top:8px;padding:8px 10px;background:'+(cr.roll_color==='green'?'var(--gd)':cr.roll_color==='yellow'?'var(--yd)':cr.roll_color==='orange'?'var(--od)':'var(--rd)')+';border-radius:4px;border-left:3px solid '+rlc+'">';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+rlc+'">'+cr.roll_status+'</div>';
+h+='<div style="font-size:9px;color:var(--tm);margin-top:2px">'+fm.ticker+' FND: '+fm.fnd+'</div></div>';
+if(cr.roll_urgency==='critical'||cr.roll_urgency==='warning'){
+h+='<div style="margin-top:6px;padding:6px 10px;background:var(--rd);border-radius:4px;font-size:10px;color:var(--r)">\u26A0 Liquidity migrating to '+(nm?nm.ticker:'next contract')+' \u2014 check execution quality</div>';}
+if(cr.open_interest){var oi=cr.open_interest;
+h+='<div style="margin-top:10px;border-top:1px solid var(--bd);padding-top:8px">';
+h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Open Interest</div>';
+h+='<div class="ctx-row"><span class="ctx-l">Total OI</span><span class="ctx-v">'+n(oi.total)+' contracts</span></div>';
+if(oi.trend){var otc=oi.trend==='building'?'var(--g)':oi.trend==='declining'?'var(--r)':'var(--tm)';
+var oarr=oi.trend==='building'?'\u2191':oi.trend==='declining'?'\u2193':'\u2192';
+h+='<div class="ctx-row"><span class="ctx-l">Trend</span><span class="ctx-v" style="color:'+otc+'">'+oarr+' '+oi.trend+'</span></div>';
+if(oi.change_5d!==undefined)h+='<div class="ctx-row"><span class="ctx-l">'+oi.history_days+'d Change</span><span class="ctx-v" style="color:'+otc+'">'+(oi.change_5d>0?'+':'')+n(oi.change_5d)+' ('+oi.change_5d_pct+'%)</span></div>';}
+h+='</div>';}
+}else h+='<div class="nd">Contract data unavailable</div>';
 h+='</div>';
 // Decisions
 h+='<div class="pn dp s2"><div class="pl">What To Do</div><div class="dl">';
