@@ -224,6 +224,9 @@ var noPriceLbs=invPo-pricedUn;
 var hedgeLots=pos?(Math.round((pos.comex_futures||0)/25000)+Math.round((pos.lme_futures||0)/25000)):0;
 var hedgeLbs=pos?((pos.comex_futures||0)+(pos.lme_futures||0)):0;
 var bal=noPriceLbs-hedgeLbs;
+var balClr=bal>0?'var(--r)':'var(--g)',balLbl=bal>0?'LONG':'SHORT';
+h+='<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px"><span style="font-family:JetBrains Mono,monospace;font-size:28px;font-weight:700;color:'+balClr+'">'+n(Math.abs(Math.round(bal)))+'</span><span style="font-size:11px;color:var(--td)">lbs</span></div>';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;letter-spacing:1px;color:'+balClr+';margin-bottom:12px">UNPRICED '+balLbl+'</div>';
 h+='<div class="dl">';
 h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--b)"><span>Inventory Copper</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(r.inventory_cu_lbs))+'</span></div>';
 h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--b)"><span>PO Waiting to be Received</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(r.po_lbs))+'</span></div>';
@@ -234,7 +237,6 @@ h+='<div class="di" style="display:flex;justify-content:space-between;align-item
 h+='<div style="height:4px"></div>';
 h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--p)"><span>Inv/PO with No Sell Price</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(noPriceLbs))+'</span></div>';
 h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--p)"><span>Hedge to Balance</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+hedgeLots+' Lots \u2014 '+n(Math.round(hedgeLbs))+' LBS</span></div>';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid '+(bal>0?'var(--r)':'var(--g)') +';border-top:2px solid var(--bd)"><span style="font-weight:700">Balance</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:16px;color:'+(bal>0?'var(--r)':'var(--g)')+'">'+n(Math.round(bal))+'</span></div>';
 h+='</div>';
 if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">Source: '+pos.source_file+' \u2014 '+pos.updated+'</div>';
 }else h+='<div class="nd">No position data</div>';
