@@ -209,10 +209,16 @@ if(fed.first_cut&&fed.first_cut!=='None priced'){h+='<div class="lr"><span class
 else if(fed.yield_10y){h+='<div class="lr"><span class="ll">10Y Yield</span><span class="lv">'+fed.yield_10y+'%</span></div>';}
 h+='<div class="lr"><span class="ll">Fed Rate</span><span class="lv">'+fed.current_rate+'%</span></div>';}
 // Warehouse
-if(m.warehouse&&m.warehouse.mt){var wh=m.warehouse,wa=wh.trend==='building'?'\u2191 Building':wh.trend==='drawing'?'\u2193 Drawing':'\u2192 Stable';
+if(m.warehouse&&m.warehouse.mt){var wh=m.warehouse;
+var wa=wh.trend==='building'?'\u2191 Building':wh.trend==='drawing'?'\u2193 Drawing':'\u2192 Stable';
 var wc=wh.trend==='building'?'var(--r)':wh.trend==='drawing'?'var(--g)':'var(--tm)';
-h+='<div class="lr"><span class="ll">COMEX Warehouse</span><span class="lv" style="color:'+wc+'">'+n(wh.mt)+' MT '+wa+'</span></div>';
-h+='<div style="text-align:right;font-size:8px;color:var(--td)">as of '+wh.date+'</div>';}
+h+='<div class="lr"><span class="ll">COMEX</span><span class="lv" style="color:'+wc+'">'+n(wh.mt)+' MT '+wa+'</span></div>';
+if(wh.lme){var lw=wh.lme,la=lw.trend==='building'?'\u2191':lw.trend==='drawing'?'\u2193':'\u2192';
+var lc=lw.trend==='building'?'var(--r)':lw.trend==='drawing'?'var(--g)':'var(--tm)';
+h+='<div class="lr"><span class="ll">LME</span><span class="lv" style="color:'+lc+'">'+n(lw.mt)+' MT '+la+'</span></div>';}
+if(wh.global_mt){h+='<div class="lr" style="border-top:1px solid var(--bd);margin-top:2px;padding-top:4px"><span class="ll" style="font-weight:600">Global</span><span class="lv" style="font-weight:700">'+n(wh.global_mt)+' MT</span></div>';}
+var whDate=wh.date;if(wh.lme)whDate+=' / '+wh.lme.date;
+h+='<div style="text-align:right;font-size:8px;color:var(--td)">'+whDate+'</div>';}
 h+='<div class="sc" id="sk"></div></div>';
 // Morning Report
 h+='<div class="pn rp"><div class="pl">Morning Report</div>';

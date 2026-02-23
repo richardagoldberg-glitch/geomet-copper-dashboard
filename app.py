@@ -765,19 +765,78 @@ def fetch_cme_warehouse():
         print(f"[WARN] CME warehouse scrape error: {e}")
         return None
 
+_lme_wh_cache = {"data": None, "timestamp": 0}
+
+def fetch_lme_warehouse():
+    """Scrape LME copper warehouse stocks from westmetall.com (24h cache)."""
+    global _lme_wh_cache
+    now = time.time()
+    if _lme_wh_cache["data"] and (now - _lme_wh_cache["timestamp"]) < 86400:
+        return _lme_wh_cache["data"]
+    try:
+        import urllib.request
+        url = "https://www.westmetall.com/en/markdaten.php?action=table&field=LME_Cu_cash"
+        req = urllib.request.Request(url, headers={"User-Agent": "GeometDashboard/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        # Parse rows: date | cash | 3mo | stock
+        # Look for patterns like "235,150" in the stock column
+        rows = []
+        for line in html.split("</tr>"):
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", line, re.DOTALL)
+            if len(cells) >= 4:
+                date_str = re.sub(r"<[^>]+>", "", cells[0]).strip()
+                stock_str = re.sub(r"<[^>]+>", "", cells[3]).strip().replace(",", "").replace(".", "")
+                if stock_str.isdigit() and int(stock_str) > 1000:
+                    rows.append({"date": date_str, "stock": int(stock_str)})
+        if not rows:
+            return None
+        latest = rows[0]
+        prev = rows[1] if len(rows) > 1 else latest
+        stock_mt = latest["stock"]
+        prev_mt = prev["stock"]
+        net_change = stock_mt - prev_mt
+        trend = "building" if net_change > 0 else "drawing" if net_change < 0 else "stable"
+        result = {
+            "mt": stock_mt, "lbs": int(stock_mt * MT_TO_LB),
+            "date": latest["date"], "trend": trend,
+            "net_change_mt": net_change, "source": "westmetall",
+        }
+        _lme_wh_cache = {"data": result, "timestamp": now}
+        print(f"[INFO] LME warehouse: {stock_mt:,} MT ({trend}, {latest['date']})")
+        return result
+    except Exception as e:
+        print(f"[WARN] LME warehouse scrape error: {e}")
+        return None
+
+
 def get_warehouse_data():
-    # Try live CME data first, fall back to static config
-    live = fetch_cme_warehouse()
-    if live:
-        return live
-    wh = CFG.get("COMEX_WAREHOUSE_MT", 0)
-    if not wh: return None
-    return {
-        "mt": wh, "lbs": int(wh * MT_TO_LB),
-        "date": CFG.get("COMEX_WAREHOUSE_DATE", ""),
-        "trend": CFG.get("COMEX_WAREHOUSE_TREND", ""),
-        "source": "config",
-    }
+    # COMEX: try live CME data first, fall back to static config
+    comex = fetch_cme_warehouse()
+    if not comex:
+        wh = CFG.get("COMEX_WAREHOUSE_MT", 0)
+        if wh:
+            comex = {
+                "mt": wh, "lbs": int(wh * MT_TO_LB),
+                "date": CFG.get("COMEX_WAREHOUSE_DATE", ""),
+                "trend": CFG.get("COMEX_WAREHOUSE_TREND", ""),
+                "source": "config",
+            }
+    lme_wh = fetch_lme_warehouse()
+    # Build combined result
+    result = {"comex": comex, "lme": lme_wh}
+    if comex and lme_wh:
+        global_mt = comex["mt"] + lme_wh["mt"]
+        result["global_mt"] = global_mt
+        result["global_lbs"] = int(global_mt * MT_TO_LB)
+    # Backward compat: keep top-level fields from COMEX
+    if comex:
+        result["mt"] = comex["mt"]
+        result["lbs"] = comex["lbs"]
+        result["date"] = comex["date"]
+        result["trend"] = comex["trend"]
+        result["source"] = comex["source"]
+    return result if (comex or lme_wh) else None
 
 
 # ---------------------------------------------------------------------------
@@ -1657,7 +1716,14 @@ def gen_decisions(sig, risk, md, fix_window, roll=None):
     wh = md.get("warehouse") if md else None
     if wh and wh.get("mt"):
         arrow = "\u2191" if wh["trend"] == "building" else "\u2193" if wh["trend"] == "drawing" else "\u2192"
-        dec.append(f"COMEX warehouse: {wh['mt']:,} MT {arrow} ({wh.get('date','')}) \u2014 {'bearish overhang' if wh['trend']=='building' else 'supply tightening' if wh['trend']=='drawing' else 'stable'}")
+        msg = f"COMEX: {wh['mt']:,} MT {arrow}"
+        if wh.get("lme"):
+            lw = wh["lme"]
+            la = "\u2191" if lw["trend"] == "building" else "\u2193" if lw["trend"] == "drawing" else "\u2192"
+            msg += f" / LME: {lw['mt']:,} MT {la}"
+        if wh.get("global_mt"):
+            msg += f" \u2014 Global: {wh['global_mt']:,} MT"
+        dec.append(msg)
 
     # Contract roll alert
     if roll and roll.get("roll_urgency") in ("critical", "warning"):
