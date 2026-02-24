@@ -251,15 +251,17 @@ def _fetch_realtime_price():
 # ---------------------------------------------------------------------------
 _intraday_cache = {"data": None, "timestamp": 0}
 
-def fetch_intraday_spark():
+def fetch_intraday_spark(ticker=None):
     """Fetch today's 5-min OHLC bars from yfinance for intraday sparkline."""
     global _intraday_cache
     now = time.time()
     if _intraday_cache["data"] and (now - _intraday_cache["timestamp"]) < 120:
         return _intraday_cache["data"]
+    if not ticker:
+        ticker, _ = _get_active_yf_ticker()
     try:
         import yfinance as yf
-        t = yf.Ticker("HG=F")
+        t = yf.Ticker(ticker)
         h = t.history(period="1d", interval="5m")
         if h.empty:
             return _intraday_cache["data"]

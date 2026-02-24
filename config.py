@@ -11,10 +11,10 @@ METALS_DEV_API_KEY = os.environ.get("METALS_DEV_API_KEY", "")
 LME_MANUAL_USD_MT = 12850
 
 # Fix target — COMEX price where you want to start pricing unpriced longs
-FIX_TARGET = 5.90
+FIX_TARGET = 6.00
 
 # GTC ladder levels
-GTC_LEVELS = [5.90, 5.95, 6.00, 6.05]
+GTC_LEVELS = [6.00, 6.05, 6.10, 6.15]
 
 # Truckload size in lbs
 TRUCKLOAD_LBS = 42000

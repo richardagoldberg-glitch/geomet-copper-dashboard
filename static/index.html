@@ -199,14 +199,16 @@ h+='<div class="lr"><span class="ll">Spread</span><span class="lv" style="color:
 // LME section
 h+='<div style="border-top:1px solid var(--bd);margin:8px 0"></div>';
 if(m.lme_price_lb){
-h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+m.lme_price_lb.toFixed(4)+'/lb';
-if(m.lme_change!==null&&m.lme_change!==undefined){var lcc=m.lme_change>=0?'up':'dn',lcs=m.lme_change>=0?'+':'';h+=' <span class="pc '+lcc+'" style="font-size:9px;padding:1px 4px;margin-left:4px">'+lcs+m.lme_change.toFixed(4)+' ('+lcs+m.lme_change_pct.toFixed(2)+'%)</span>';}
-h+='</span></div>';
+h+='<div style="display:flex;align-items:baseline;gap:8px;padding:8px 10px;background:var(--sf2);border-radius:4px"><span style="font-size:10px;color:var(--tm)">LME 3M</span><span style="font-family:JetBrains Mono,monospace;font-size:22px;font-weight:700">$'+m.lme_price_lb.toFixed(4)+'</span><span style="font-size:10px;color:var(--td)">/lb</span>';
+if(m.lme_change!==null&&m.lme_change!==undefined){var lcc=m.lme_change>=0?'up':'dn',lcs=m.lme_change>=0?'+':'';h+='<span class="pc '+lcc+'" style="font-size:10px;padding:2px 5px">'+lcs+m.lme_change.toFixed(4)+' ('+lcs+m.lme_change_pct.toFixed(2)+'%)</span>';}
+h+='</div>';
 if(m.lme_price_mt)h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+n(Math.round(m.lme_price_mt))+'/MT</span></div>';
 if(m.comex_lme_spread!==null&&m.comex_lme_spread!==undefined){var spc=m.comex_lme_spread>=0?'var(--g)':'var(--b)';
 h+='<div class="lr"><span class="ll">COMEX-LME</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb</span></div>';}
 h+='<div style="text-align:right;font-size:8px;color:var(--td);margin-top:3px">via '+m.lme_source+'</div>';
 }else{h+='<div class="lr"><span class="ll">LME</span><span style="font-size:9px;color:var(--r)">Not configured</span></div>';}
+// Sparkline — near price data
+h+='<div class="sc"><div class="sk-hdr"><div class="sk-tabs"><span class="sk-tab active" data-sk="1d">Today</span><span class="sk-tab" data-sk="7d">7D</span><span class="sk-tab" data-sk="30d">30D</span></div><span class="sk-range" id="sk-rng"></span></div><div class="sk-wrap"><span class="sk-y" id="sk-lo"></span><div class="sk-chart" id="sk"></div><span class="sk-y" id="sk-hi"></span></div></div>';
 // Macro section
 h+='<div style="border-top:1px solid var(--bd);margin:8px 0"></div>';
 if(m.dxy&&m.dxy.price){var dx=m.dxy,dcl=dx.change>=0?'var(--r)':'var(--g)';
@@ -228,7 +230,7 @@ h+='<div class="lr"><span class="ll">LME</span><span class="lv" style="color:'+l
 if(wh.global_mt){h+='<div class="lr" style="border-top:1px solid var(--bd);margin-top:2px;padding-top:4px"><span class="ll" style="font-weight:600">Global</span><span class="lv" style="font-weight:700">'+n(wh.global_mt)+' MT</span></div>';}
 var whDate=wh.date;if(wh.lme)whDate+=' / '+wh.lme.date;
 h+='<div style="text-align:right;font-size:8px;color:var(--td)">'+whDate+'</div>';}
-h+='<div class="sc"><div class="sk-hdr"><div class="sk-tabs"><span class="sk-tab active" data-sk="1d">Today</span><span class="sk-tab" data-sk="7d">7D</span><span class="sk-tab" data-sk="30d">30D</span></div><span class="sk-range" id="sk-rng"></span></div><div class="sk-wrap"><span class="sk-y" id="sk-lo"></span><div class="sk-chart" id="sk"></div><span class="sk-y" id="sk-hi"></span></div></div></div>';
+h+='</div>';
 // Morning Report
 h+='<div class="pn rp"><div class="pl">Morning Report</div>';
 if(r&&r.total_inv_po>0){
