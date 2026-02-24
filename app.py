@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Geomet Recycling - Copper Intelligence Dashboard v4.1
-Fix Window, Fed Funds, Warehouse Stocks, Price Context, DXY, S/R
+Geomet Recycling - Copper Intelligence Dashboard v5.0
+Multi-timeframe charts, LME hours, fix window, warehouse (COMEX+LME),
+sales pipeline, actionable orders, Tailscale remote access
 """
 
 import json, os, csv, glob, re, time, hashlib, secrets, calendar
@@ -83,8 +84,6 @@ def fetch_lme_price():
             req = urllib.request.Request(url, headers={"User-Agent": "GeometDashboard/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
-                print(f"[DEBUG] metals.dev response keys: {list(data.keys())}")
-                print(f"[DEBUG] metals.dev full response: {json.dumps(data, default=str)[:800]}")
                 if "rate" in data:
                     rate = data["rate"]
                     price_mt = rate["price"] if isinstance(rate, dict) else rate
@@ -124,8 +123,6 @@ def _fetch_prev_settle_yf(ticker="HG=F"):
         if not hd.empty and len(hd) >= 2:
             hd = hd.reset_index()
             hd.columns = [c if isinstance(c, str) else c[0] for c in hd.columns]
-            for i in range(len(hd)):
-                print(f"[DEBUG] yf daily {ticker} bar {i}: {hd.iloc[i]['Date']} close={hd.iloc[i]['Close']:.4f}")
             today_date = datetime.now().date()
             last_date = hd.iloc[-1]["Date"]
             if hasattr(last_date, 'date'):
@@ -207,49 +204,7 @@ def _fetch_realtime_price():
     # Determine which contract to show based on FND proximity
     active_ticker, active_contract = _get_active_yf_ticker()
 
-    # Method 1: investing.com chart API (real-time, but may be Cloudflare-blocked)
-    try:
-        import urllib.request
-        url = "https://api.investing.com/api/financialdata/8831/historical/chart/?period=P1D&interval=PT5M&pointscount=60"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-            "domain-id": "www",
-        })
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode()
-            data = json.loads(raw)
-
-            bars = None
-            if isinstance(data, dict) and "data" in data:
-                bars = data["data"]
-            elif isinstance(data, list):
-                bars = data
-
-            if bars and len(bars) > 0:
-                latest = bars[-1]
-                price = 0
-                if isinstance(latest, list) and len(latest) > 4:
-                    price = float(latest[4])
-                elif isinstance(latest, dict):
-                    for key in ("close", "c", "last_close", "last", "price"):
-                        if key in latest and latest[key]:
-                            price = float(latest[key]); break
-
-                if price > 1:
-                    # investing.com tracks May — use May prev settle
-                    prev_close = _fetch_prev_settle_yf(active_ticker)
-                    if not prev_close:
-                        prev_close = _fetch_prev_settle_yf("HG=F")
-                    _rt_cache = {"price": round(price, 4), "prev_close": prev_close,
-                                 "timestamp": now, "source": "investing.com",
-                                 "active_contract": "next"}
-                    print(f"[INFO] RT from investing.com: ${price:.4f}")
-                    return _rt_cache
-    except Exception as e:
-        print(f"[WARN] investing.com RT error: {e}")
-
-    # Method 2: yfinance intraday — use the active contract
+    # yfinance intraday — use the active contract
     try:
         import yfinance as yf
         t = yf.Ticker(active_ticker)
@@ -483,12 +438,6 @@ def fetch_fed_data():
 # ---------------------------------------------------------------------------
 def get_china_status():
     now = datetime.now()
-    lny_start = datetime(2026, 2, 15)
-    lny_end = datetime(2026, 2, 23, 23, 59, 59)
-    if lny_start <= now <= lny_end:
-        days_left = (lny_end - now).days
-        return {"status": "CLOSED", "reason": "Lunar New Year",
-                "detail": f"SHFE closed \u2014 returns Feb 24 ({days_left}d)", "color": "red", "thin_liquidity": True}
     wd = now.weekday(); hr = now.hour
     if wd >= 5:
         return {"status": "CLOSED", "reason": "Weekend", "detail": "SHFE closed \u2014 weekend",
@@ -706,8 +655,6 @@ def calc_fixable_orders(pos, md):
 
     lme = md.get("lme", {})
     lme_open = lme.get("status") in ("OPEN", "RING") if lme else False
-    # COMEX electronic is essentially 23h/day Sun-Fri, assume open if market data exists
-    comex_open = md.get("price") is not None
 
     fixable = 0; fixable_lbs = 0; blocked_lme = 0; blocked_lme_lbs = 0
     shipped_fixable = []
@@ -1481,8 +1428,7 @@ def fetch_copper_data():
             "roc": roc, "streak": streak, "streak_dir": streak_dir,
             "avg_daily_range": avg_daily_range, "vol_vs_avg": vol_vs_avg,
             "support_resistance": sr, "dxy": dxy, "china": china, "lme": lme_status,
-            "fed": fed, "warehouse": warehouse,
-            "_daily_prev_settle": round(_daily_prev_settle, 4),
+            "fed": fed, "warehouse": warehouse, "daily_prev_settle": round(_daily_prev_settle, 4),
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         _copper_cache = {"data": result, "timestamp": time.time()}
@@ -1926,7 +1872,7 @@ class Handler(SimpleHTTPRequestHandler):
             rt = _fetch_realtime_price()
             if rt.get("price") and md:
                 md = dict(md)  # copy so we don't mutate the cache
-                prev = rt.get("prev_close") or md.get("_daily_prev_settle", md["prev_close"])
+                prev = rt.get("prev_close") or md.get("daily_prev_settle", md["prev_close"])
                 md["price"] = rt["price"]
                 md["prev_close"] = prev
                 md["change"] = round(rt["price"] - prev, 4)
@@ -2021,7 +1967,7 @@ def main():
     lme_src = "metals.dev API" if CFG["METALS_DEV_API_KEY"] else ("manual" if CFG["LME_MANUAL_USD_MT"] else "NOT CONFIGURED")
     print()
     print("=" * 55)
-    print("  GEOMET COPPER INTELLIGENCE DASHBOARD v4.1")
+    print("  GEOMET COPPER INTELLIGENCE DASHBOARD v5.0")
     print("=" * 55)
     print(f"  Dashboard:  http://localhost:{PORT}")
     print(f"  Fix target: ${CFG['FIX_TARGET']}")
