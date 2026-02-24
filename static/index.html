@@ -44,7 +44,7 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .mc-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
 .mc-title{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:.5px;color:var(--td)}
 .mc-val{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700}
-.mc-chart{height:32px}.mc-chart svg{width:100%;height:100%}
+.mc-chart{height:56px}.mc-chart svg{width:100%;height:100%}
 .mg{display:grid;gap:7px}
 .mr{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid transparent}
 .mr.a{border-left-color:var(--g)}.mr.bl{border-left-color:var(--r)}
@@ -149,7 +149,7 @@ body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--t
 </style>
 </head>
 <body>
-<div class="hdr"><div class="hdr-l"><div class="logo"><img src="/logo.jpg" alt="Geomet"></div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
+<div class="hdr"><div class="hdr-l"><div class="logo"><img src="/logo.png" alt="Geomet"></div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
 <div class="hdr-r"><div id="lme" class="ch-badge closed"></div><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
 <div class="db" id="db"><div class="ld"><div class="ls"></div>Fetching copper data...</div></div>
 <script>
@@ -449,7 +449,7 @@ renderMiniCharts(m);
 }
 function mkSvg(el,data,color,data2,color2){
 if(!el||!data||!data.length)return;
-var w=el.clientWidth||80,ht=32;
+var w=el.clientWidth||80,ht=56;
 var all=data.slice();if(data2)all=all.concat(data2);
 var mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=mx-mn||1;
 function pts(p){return p.map(function(v,i){return(i/(p.length-1))*w+','+(ht-((v-mn)/rg)*(ht-4)-2)}).join(' ');}
