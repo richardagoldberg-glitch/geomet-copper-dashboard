@@ -292,6 +292,42 @@ def _fetch_realtime_price():
 
 
 # ---------------------------------------------------------------------------
+# INTRADAY SPARKLINE — 5-min bars for "Today" chart
+# ---------------------------------------------------------------------------
+_intraday_cache = {"data": None, "timestamp": 0}
+
+def fetch_intraday_spark():
+    """Fetch today's 5-min OHLC bars from yfinance for intraday sparkline."""
+    global _intraday_cache
+    now = time.time()
+    if _intraday_cache["data"] and (now - _intraday_cache["timestamp"]) < 120:
+        return _intraday_cache["data"]
+    try:
+        import yfinance as yf
+        t = yf.Ticker("HG=F")
+        h = t.history(period="1d", interval="5m")
+        if h.empty:
+            return _intraday_cache["data"]
+        h = h.reset_index()
+        h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+        points = []
+        for _, row in h.iterrows():
+            ts = row["Datetime"] if "Datetime" in h.columns else row.get("Date")
+            c = float(row["Close"])
+            hi = float(row["High"])
+            lo = float(row["Low"])
+            if c > 1:
+                label = ts.strftime("%H:%M") if hasattr(ts, "strftime") else str(ts)[-8:-3]
+                points.append({"time": label, "close": round(c, 4), "high": round(hi, 4), "low": round(lo, 4)})
+        if points:
+            _intraday_cache = {"data": points, "timestamp": now}
+            return points
+    except Exception as e:
+        print(f"[WARN] intraday spark error: {e}")
+    return _intraday_cache["data"]
+
+
+# ---------------------------------------------------------------------------
 # DXY
 # ---------------------------------------------------------------------------
 _dxy_cache = {"price": None, "change": None, "change_pct": None, "timestamp": 0}
@@ -1369,8 +1405,11 @@ def fetch_copper_data():
             vol_ratio = 1.0
 
         recent = closes[-5:] if n_closes >= 5 else closes
-        spark = [{"date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10],
-                  "close": round(c, 4)} for d, c in zip(dates[-30:], closes[-30:])]
+        spark_30d = [{"date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10],
+                      "close": round(c, 4)} for d, c in zip(dates[-30:], closes[-30:])]
+        spark_7d = [{"date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10],
+                     "close": round(c, 4)} for d, c in zip(dates[-7:], closes[-7:])]
+        spark_1d = fetch_intraday_spark() or []
 
         today_high = highs[-1]; today_low = lows[-1]
         today_range = today_high - today_low
@@ -1430,7 +1469,7 @@ def fetch_copper_data():
             "change": round(change, 4), "change_pct": round(change_pct, 2),
             "ma50": round(ma50, 4), "ma100": round(ma100, 4), "ma200": round(ma200, 4),
             "vol_ratio": round(vol_ratio, 2), "recent_closes": [round(c, 4) for c in recent],
-            "sparkline": spark, "copper_source": copper_source,
+            "sparkline": spark_30d, "spark_7d": spark_7d, "spark_1d": spark_1d, "copper_source": copper_source,
             "lme_price_lb": lme_price, "lme_price_mt": lme_mt, "lme_source": lme_source,
             "lme_change": lme_change, "lme_change_pct": lme_change_pct,
             "comex_lme_spread": spread, "comex_lme_spread_pct": spread_pct, "spread_intel": spread_intel,
