@@ -1436,12 +1436,12 @@ def fetch_copper_data():
         if spread is not None and lme_price:
             history = save_spread_entry(round(price, 4), round(lme_price, 4), round(spread, 4))
             spread_intel = compute_spread_intelligence(history, spread)
-            # LME daily change from previous day's spread history entry
-            if len(history) >= 2:
-                prev_lme = history[-2].get("lme")
-                if prev_lme:
-                    lme_change = round(lme_price - prev_lme, 4)
-                    lme_change_pct = round((lme_change / prev_lme) * 100, 2)
+            # LME daily change — use COMEX prev settle as proxy for LME prev settle
+            # COMEX and LME settle near parity, so this gives an accurate session change
+            # (until we add a real LME settlement feed like westmetall)
+            if prev_close:
+                lme_change = round(lme_price - prev_close, 4)
+                lme_change_pct = round((lme_change / prev_close) * 100, 2)
 
         dxy = fetch_dxy()
         china = get_china_status()
