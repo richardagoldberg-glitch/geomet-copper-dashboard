@@ -756,7 +756,7 @@ def fetch_cme_warehouse():
 _lme_wh_cache = {"data": None, "timestamp": 0}
 
 def fetch_lme_warehouse():
-    """Scrape LME copper warehouse stocks from westmetall.com (24h cache)."""
+    """Scrape LME copper warehouse stocks + Cash/3M settlements from westmetall.com (24h cache)."""
     global _lme_wh_cache
     now = time.time()
     if _lme_wh_cache["data"] and (now - _lme_wh_cache["timestamp"]) < 86400:
@@ -767,8 +767,7 @@ def fetch_lme_warehouse():
         req = urllib.request.Request(url, headers={"User-Agent": "GeometDashboard/1.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-        # Parse rows: date | cash | 3mo | stock
-        # Look for patterns like "235,150" in the stock column
+        # Parse rows: date | cash-settlement (USD/MT) | 3-month (USD/MT) | stock (MT)
         rows = []
         for line in html.split("</tr>"):
             cells = re.findall(r"<td[^>]*>(.*?)</td>", line, re.DOTALL)
@@ -776,7 +775,21 @@ def fetch_lme_warehouse():
                 date_str = re.sub(r"<[^>]+>", "", cells[0]).strip()
                 stock_str = re.sub(r"<[^>]+>", "", cells[3]).strip().replace(",", "").replace(".", "")
                 if stock_str.isdigit() and int(stock_str) > 1000:
-                    rows.append({"date": date_str, "stock": int(stock_str)})
+                    # Parse Cash and 3M prices — format: "12,832.00"
+                    cash_str = re.sub(r"<[^>]+>", "", cells[1]).strip().replace(",", "")
+                    three_m_str = re.sub(r"<[^>]+>", "", cells[2]).strip().replace(",", "")
+                    cash_mt = None
+                    three_m_mt = None
+                    try:
+                        cash_mt = float(cash_str)
+                    except ValueError:
+                        pass
+                    try:
+                        three_m_mt = float(three_m_str)
+                    except ValueError:
+                        pass
+                    rows.append({"date": date_str, "stock": int(stock_str),
+                                 "cash_mt": cash_mt, "three_m_mt": three_m_mt})
         if not rows:
             return None
         latest = rows[0]
@@ -790,6 +803,18 @@ def fetch_lme_warehouse():
             "date": latest["date"], "trend": trend,
             "net_change_mt": net_change, "source": "westmetall",
         }
+        # LME Official Settlement prices (Cash and 3M)
+        if latest.get("cash_mt"):
+            cash_3m_spread = None
+            if latest.get("three_m_mt"):
+                cash_3m_spread = round(latest["three_m_mt"] - latest["cash_mt"], 2)
+            result["lme_cash_settle_mt"] = latest["cash_mt"]
+            result["lme_cash_settle_lb"] = round(latest["cash_mt"] / MT_TO_LB, 4)
+            result["lme_3m_settle_mt"] = latest.get("three_m_mt")
+            result["lme_cash_3m_spread_mt"] = cash_3m_spread
+            print(f"[INFO] LME Officials: Cash ${latest['cash_mt']:,.0f}/MT, "
+                  f"3M ${latest.get('three_m_mt', 0):,.0f}/MT, "
+                  f"spread ${cash_3m_spread}/MT ({latest['date']})")
         _lme_wh_cache = {"data": result, "timestamp": now}
         print(f"[INFO] LME warehouse: {stock_mt:,} MT ({trend}, {latest['date']})")
         return result
@@ -1338,6 +1363,35 @@ def _fetch_ohlc_yfinance():
     print(f"[INFO] Copper from yfinance ({len(closes)} days)")
     return {"dates": dates, "closes": closes, "highs": highs, "lows": lows, "volumes": volumes, "source": "yfinance"}
 
+def _lme_cash_mt(lme_3m_mt, warehouse):
+    """Get LME Cash price in $/MT — use westmetall Official if available, else estimate from 3M."""
+    lme_wh = warehouse.get("lme") if warehouse else None
+    if lme_wh and lme_wh.get("lme_cash_settle_mt"):
+        # Use live 3M minus official Cash-3M spread (more accurate than day-old Cash settle)
+        spread = lme_wh.get("lme_cash_3m_spread_mt")
+        if spread is not None and lme_3m_mt:
+            return round(lme_3m_mt - spread, 2)
+        return lme_wh["lme_cash_settle_mt"]
+    # Fallback: estimate $90/MT below 3M
+    if lme_3m_mt:
+        return round(lme_3m_mt - 90, 2)
+    return None
+
+def _lme_cash_lb(lme_3m_mt, warehouse):
+    """Get LME Cash price in $/lb."""
+    cash_mt = _lme_cash_mt(lme_3m_mt, warehouse)
+    if cash_mt:
+        return round(cash_mt / MT_TO_LB, 4)
+    return None
+
+def _lme_cash_3m_spread(lme_3m_mt, warehouse):
+    """Get Cash-3M spread in $/MT from westmetall, or fallback to $90 estimate."""
+    lme_wh = warehouse.get("lme") if warehouse else None
+    if lme_wh and lme_wh.get("lme_cash_3m_spread_mt") is not None:
+        return lme_wh["lme_cash_3m_spread_mt"]
+    return 90  # fallback estimate
+
+
 def fetch_copper_data():
     global _copper_cache
     now = time.time()
@@ -1464,9 +1518,9 @@ def fetch_copper_data():
             "sparkline": spark_30d, "spark_7d": spark_7d, "spark_1d": spark_1d,
             "lme_spark": lme_spark, "copper_source": copper_source,
             "lme_price_lb": lme_price, "lme_price_mt": lme_mt, "lme_source": lme_source,
-            "lme_cash_mt": round(lme_mt - 90, 2) if lme_mt else None,
-            "lme_cash_lb": round((lme_mt - 90) / MT_TO_LB, 4) if lme_mt else None,
-            "lme_cash_3m_spread_mt": 90,
+            "lme_cash_mt": _lme_cash_mt(lme_mt, warehouse),
+            "lme_cash_lb": _lme_cash_lb(lme_mt, warehouse),
+            "lme_cash_3m_spread_mt": _lme_cash_3m_spread(lme_mt, warehouse),
             "lme_change": lme_change, "lme_change_pct": lme_change_pct,
             "comex_lme_spread": spread, "comex_lme_spread_pct": spread_pct, "spread_intel": spread_intel,
             "today_high": round(today_high, 4), "today_low": round(today_low, 4),
