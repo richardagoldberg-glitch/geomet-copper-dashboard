@@ -493,51 +493,6 @@ def get_lme_status():
 
 
 # ---------------------------------------------------------------------------
-# COPPER NEWS — Google News RSS
-# ---------------------------------------------------------------------------
-_news_cache = {"articles": [], "timestamp": 0}
-
-def fetch_copper_news():
-    """Fetch copper news from Google News RSS. 15-min cache."""
-    global _news_cache
-    now = time.time()
-    if _news_cache["articles"] and (now - _news_cache["timestamp"]) < 900:
-        return _news_cache["articles"]
-    try:
-        import urllib.request
-        from xml.etree import ElementTree
-        url = "https://news.google.com/rss/search?q=copper+price+OR+copper+market+OR+copper+mining&hl=en-US&gl=US&ceid=US:en"
-        req = urllib.request.Request(url, headers={"User-Agent": "GeometDashboard/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            tree = ElementTree.fromstring(resp.read())
-        articles = []
-        for item in tree.findall(".//item")[:8]:
-            title = item.findtext("title", "")
-            link = item.findtext("link", "")
-            pub = item.findtext("pubDate", "")
-            source = item.findtext("source", "")
-            # Parse pub date to relative time
-            ago = ""
-            if pub:
-                try:
-                    from email.utils import parsedate_to_datetime
-                    dt = parsedate_to_datetime(pub)
-                    diff = datetime.now(dt.tzinfo) - dt
-                    mins = int(diff.total_seconds() / 60)
-                    if mins < 60: ago = f"{mins}m ago"
-                    elif mins < 1440: ago = f"{mins // 60}h ago"
-                    else: ago = f"{mins // 1440}d ago"
-                except: ago = pub[:16]
-            articles.append({"title": title, "link": link, "source": source, "ago": ago})
-        if articles:
-            _news_cache = {"articles": articles, "timestamp": now}
-            return articles
-    except Exception as e:
-        print(f"[WARN] News fetch error: {e}")
-    return _news_cache["articles"]
-
-
-# ---------------------------------------------------------------------------
 # SPREAD HISTORY
 # ---------------------------------------------------------------------------
 def load_spread_history():
@@ -1998,11 +1953,10 @@ class Handler(SimpleHTTPRequestHandler):
             gtc = gen_gtc(pos, md)
             margin = calc_margin_projection(pos, md, risk)
             fixable = calc_fixable_orders(pos, md)
-            news = fetch_copper_news()
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
-                "fixable_orders": fixable, "news": news,
+                "fixable_orders": fixable,
                 "margin_projection": margin, "contract_roll": roll,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

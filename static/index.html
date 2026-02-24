@@ -136,12 +136,6 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .so-basis.comex{background:var(--cg);color:var(--cu)}.so-basis.lme{background:var(--bdd);color:var(--b)}
 .fw-context{padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;font-size:10px;color:var(--tm)}
 .fw-nudge{padding:8px 10px;background:rgba(0,229,155,.08);border:1px dashed rgba(0,229,155,.3);border-radius:4px;margin-top:6px;font-size:10px;color:var(--g);font-weight:500}
-.nwp .pl::before{background:var(--y)}
-.nw-item{display:block;padding:7px 10px;background:var(--sf2);border-radius:4px;margin-bottom:4px;border-left:3px solid var(--bd);cursor:pointer;transition:border-color .2s;text-decoration:none;color:inherit}
-.nw-item:hover{border-left-color:var(--cu)}.nw-item:visited{color:inherit}
-.nw-title{font-size:11px;color:var(--tx);line-height:1.3}
-.nw-meta{display:flex;gap:8px;margin-top:3px;font-size:9px;color:var(--td)}
-.nw-src{font-weight:600;color:var(--tm)}
 .arb-tag{display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:3px;margin-left:6px}
 .arb-tag.arb{background:rgba(255,192,72,.15);color:var(--y);border:1px solid rgba(255,192,72,.3)}
 .arb-tag.parity{background:var(--sf2);color:var(--tm);border:1px solid var(--bd)}
@@ -455,13 +449,6 @@ dec.forEach(function(d){var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRI
 if(d.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d.indexOf('\uD83D\uDD34')>=0)cls='di fix-bad';
 h+='<div class="'+cls+'">'+d+'</div>';});
 h+='</div></div>';
-// News Feed
-var news=d.news||[];
-if(news.length>0){
-h+='<div class="pn nwp s2"><div class="pl">Copper News</div>';
-news.forEach(function(a){
-h+='<a class="nw-item" href="'+a.link+'" target="_blank" rel="noopener"><div class="nw-title">'+a.title+'</div><div class="nw-meta"><span class="nw-src">'+a.source+'</span><span>'+a.ago+'</span></div></a>';});
-h+='</div>';}
 $('db').innerHTML=h;
 // Render mini chart strip
 renderMiniCharts(m);
