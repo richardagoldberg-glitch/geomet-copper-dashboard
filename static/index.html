@@ -28,9 +28,8 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .pl{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--td);margin-bottom:14px;display:flex;align-items:center;gap:6px}
 .pl::before{content:'';width:3px;height:10px;border-radius:1px}
 .pp .pl::before{background:var(--cu)}.tp .pl::before{background:var(--b)}.sp .pl::before{background:var(--y)}
-.gp .pl::before{background:var(--cu)}.posp .pl::before{background:var(--g)}.slp .pl::before{background:var(--p)}.sap .pl::before{background:var(--b)}
-.mgp .pl::before{background:var(--cu)}
-.rp .pl::before{background:var(--r)}.dp .pl::before{background:var(--o)}.cp .pl::before{background:var(--p)}.fwp .pl::before{background:var(--g)}.rlp .pl::before{background:var(--o)}
+.posp .pl::before{background:var(--g)}.slp .pl::before{background:var(--p)}.sap .pl::before{background:var(--b)}
+.dp .pl::before{background:var(--o)}.fwp .pl::before{background:var(--g)}
 .pm{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
 .pv{font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:700;line-height:1;letter-spacing:-1px}
 .pu{font-size:11px;color:var(--td)}
@@ -96,6 +95,7 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .ls{width:16px;height:16px;border:2px solid var(--bd);border-top-color:var(--cu);border-radius:50%;animation:sp .8s linear infinite;margin-right:8px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .s2{grid-column:span 2}
+.pn.pp{order:1}.pn.posp{order:2}.pn.sp{order:3}.pn.slp{order:4}.pn.sap{order:5}.pn.tp{order:6}.pn.dp{order:7}
 .cat-row{display:flex;justify-content:space-between;padding:6px 10px;background:var(--sf2);border-radius:4px;margin-bottom:4px;border-left:3px solid transparent}
 .cat-row.hot{border-left-color:var(--r);background:rgba(255,71,87,.06)}.cat-row.ok{border-left-color:var(--g)}.cat-row.chill{border-left-color:var(--td)}
 .cat-label{font-size:10px;color:var(--tm)}.cat-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600}
@@ -153,18 +153,13 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .db{grid-template-columns:1fr;gap:0}
 .s2{grid-column:span 1}
 /* Mobile panel order — most actionable first */
-.pn.pp{order:1} /* COMEX/LME prices */
-.pn.rp{order:2} /* Morning Report — unpriced long hero */
-.pn.sp{order:3} /* Signal + Fix Window */
+.pn.pp{order:1} /* Trading */
+.pn.posp{order:2} /* Position */
+.pn.sp{order:3} /* Signal & GTC */
 .pn.slp{order:4} /* Sales Orders */
-.pn.dp{order:13} /* What To Do — last, recap */
-.pn.posp{order:6} /* Position */
-.pn.mgp{order:7} /* Margin & Risk */
-.pn.gp{order:8} /* GTC */
-.pn.tp{order:9} /* Trend */
-.pn.cp{order:10} /* Price Context */
-.pn.sap{order:11} /* Sales Position */
-.pn.rlp{order:12} /* Contract Roll */
+.pn.sap{order:5} /* Sales & Margin */
+.pn.tp{order:6} /* Market */
+.pn.dp{order:7} /* What To Do */
 /* Compact spacing */
 .pn{padding:14px 16px}
 .pl{margin-bottom:10px;font-size:8px}
@@ -278,8 +273,8 @@ if(m.fed){var fed=m.fed;
 h+='<div class="mc-ctx-item"><span class="mc-ctx-l">Fed</span><span class="mc-ctx-v">'+fed.current_rate+'%</span></div>';}
 h+='</div>';
 h+='</div>';
-// Morning Report
-h+='<div class="pn rp" id="pn-rp"><div class="pl">Morning Report</div>';
+// Position — consolidated: Morning Report + Position + Risk
+h+='<div class="pn posp" id="pn-posp"><div class="pl">Position</div>';
 if(r&&r.total_inv_po>0){
 var unprShip=r.sales_unpriced_shipped_lbs||0;
 var invPo=r.total_inv_po;
@@ -297,11 +292,26 @@ h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><spa
 h+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--bd);color:var(--tm)"><span>= Unpriced Exposure</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;color:var(--p)">'+n(Math.round(noPriceLbs))+'</span></div>';
 h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>Hedge</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+hedgeLots+' lots / '+n(Math.round(hedgeLbs))+' lbs</span></div>';
 h+='</div>';
-if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">Source: '+pos.source_file+' \u2014 '+pos.updated+'</div>';
-}else h+='<div class="nd">No position data</div>';
+if(pos&&pos.source_file)h+='<div class="pks" style="margin-top:6px">Source: '+pos.source_file+(pos.updated?' \u2014 '+pos.updated:'')+'</div>';
+h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
+var mc=r.mtm_pl>=0?'pos':'neg';
+h+='<div class="pg"><div class="pk"><div class="pkl">Avg Cost</div><div class="pkv">$'+r.avg_cost.toFixed(4)+'</div></div>';
+h+='<div class="pk"><div class="pkl">Hedged</div><div class="pkv">'+r.hedge_pct+'%</div></div>';
+h+='<div class="pk"><div class="pkl">Mark-to-Market</div><div class="pkv '+mc+'">$'+n(Math.round(r.mtm_pl))+'</div></div>';
+h+='<div class="pk"><div class="pkl">Per 10c Move</div><div class="pkv" style="color:'+(Math.abs(r.risk_per_dime)>10000?'var(--r)':'var(--tx)')+'">$'+n(Math.round(Math.abs(r.risk_per_dime)))+'</div></div></div>';
+if(r.baseline_deviation!==undefined&&r.baseline_deviation!==null){var bd=r.baseline_deviation,abd=Math.abs(bd),bl=r.baseline_lbs,tl=cfg.truckload_lbs||42000;
+var bclr=abd<=tl?'var(--g)':abd<=tl*3?'var(--tx)':'var(--r)';
+var bdir=bd>0?'over':bd<0?'under':'on target';
+var btxt=bd===0?'On target':'<span style="font-family:JetBrains Mono,monospace;font-weight:700;color:'+bclr+'">'+(bd>0?'+':'')+n(Math.round(bd))+' '+bdir+'</span>';
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;border-left:3px solid '+bclr+'"><span style="font-size:10px;color:var(--tm)">vs Baseline ('+n(bl)+')</span>'+btxt+'</div>';}
+var hp=Math.min(r.hedge_pct,100),hbc=hp>70?'var(--g)':hp>30?'var(--y)':'var(--r)';
+h+='<div style="margin-top:8px"><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:var(--tm)">Hedge Coverage</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+r.hedge_pct+'%</span></div>';
+h+='<div class="rbg"><div class="rbf" style="width:'+hp+'%;background:'+hbc+'"></div></div></div>';
+h+='<div class="rs"><span class="rsl">Unhedged</span><span class="rsv">'+n(Math.round(r.unhedged_lbs))+' lbs</span></div>';
+}else h+='<div class="nd">Drop Hedge xlsx into data/</div>';
 h+='</div>';
-// Trend + S/R
-h+='<div class="pn tp" id="pn-tp"><div class="pl">Trend</div><div class="mg">';
+// Market — consolidated: Trend + Price Context + Contract Roll
+h+='<div class="pn tp" id="pn-tp"><div class="pl">Market</div><div class="mg">';
 [['50 DMA',m.ma50,s.above_50],['100 DMA',m.ma100,s.above_100],['200 DMA',m.ma200,s.above_200]].forEach(function(x){
 h+='<div class="mr '+(x[2]?'a':'bl')+'"><span class="ml">'+x[0]+'</span><span class="mv">'+x[1].toFixed(4)+'</span><span class="ms '+(x[2]?'a':'bl')+'">'+(x[2]?'ABOVE':'BELOW')+'</span></div>';});
 h+='</div><div style="margin-top:10px"><div class="mt">'+s.trend+' ('+s.trend_strength+')</div> <div class="mt" style="margin-left:3px">'+s.move_type+'</div></div>';
@@ -312,29 +322,7 @@ if(sr.resistance)sr.resistance.slice().reverse().forEach(function(r){h+='<div cl
 h+='<div class="sr-row" style="border-left-color:var(--cu);background:var(--cg)"><span class="sr-level" style="color:var(--cu)">'+m.price.toFixed(2)+' \u2190 NOW</span><span class="sr-dist"></span></div>';
 if(sr.support)sr.support.forEach(function(s){h+='<div class="sr-row sup"><span class="sr-level" style="color:var(--g)">'+s.level.toFixed(2)+' S</span><span class="sr-dist">'+(s.distance*100).toFixed(0)+'c below</span></div>';});
 h+='</div>';}}
-h+='</div>';
-// Signal + Fix Window
-h+='<div class="pn sp" id="pn-sp"><div class="pl">Signal</div>';
-// Fix Window Meter
-if(fw){var fwc=fw.color==='green'?'var(--g)':fw.color==='red'?'var(--r)':fw.color==='orange'?'var(--o)':'var(--y)';
-h+='<div class="fw-meter"><div class="fw-header"><span class="fw-label" style="color:'+fwc+'">FIX WINDOW</span><span class="fw-score" style="color:'+fwc+'">'+fw.score+'</span></div>';
-h+='<div class="fw-bar"><div class="fw-fill" style="width:'+fw.score+'%;background:'+fwc+'"></div></div>';
-h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+fwc+';margin-bottom:4px">'+fw.label+'</div>';
-if(fw.factors&&fw.factors.length){h+='<div class="fw-factors">';fw.factors.forEach(function(f){h+='<span class="fw-tag">'+f+'</span>';});h+='</div>';}
-h+='</div>';}
-if(fo){var fctx=fo.fixable_count+' order'+(fo.fixable_count!==1?'s':'')+' fixable now';
-if(fo.blocked_lme_count>0)fctx+=' ('+fo.blocked_lme_count+' awaiting LME)';
-h+='<div class="fw-context">'+fctx+'</div>';
-if(fw&&fw.score>=65&&fo.shipped_fixable&&fo.shipped_fixable.length>0){var top=fo.shipped_fixable[0];
-h+='<div class="fw-nudge">'+n(Math.round(top.open_lbs||top.lbs))+' lbs shipped to '+top.consumer+' \u2014 fix now?</div>';}}
-h+='<div class="sb '+s.signal_color+'">'+s.signal+'</div>';
-h+='<div class="sdt">'+s.signal_detail+'</div><div style="font-size:10px;color:var(--td);margin-top:5px">'+s.move_desc+'</div>';
-if(s.momentum_note)h+='<div style="font-size:10px;color:var(--p);margin-top:6px">'+s.momentum_note+'</div>';
-if(s.dxy_signal&&s.dxy_signal.direction!=='flat'){var dsc=s.dxy_signal.color;h+='<div style="font-size:10px;color:var(--'+dsc+');margin-top:4px">'+s.dxy_signal.msg+'</div>';}
-if(s.spread_signal){var ssc=s.spread_signal.color;h+='<div class="arb-box" style="border-left-color:var(--'+ssc+')"><div class="arb-dir" style="color:var(--'+ssc+')">'+s.spread_signal.direction+'</div><div class="arb-msg">'+s.spread_signal.msg+'</div></div>';}
-h+='</div>';
-// Price Context
-h+='<div class="pn cp" id="pn-cp"><div class="pl">Price Context</div>';
+h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 if(m.range_90d){var r90l=m.range_90d[0],r90h=m.range_90d[1],r90r=r90h-r90l;
 var ppos=r90r>0?((m.price-r90l)/r90r*100):50;
 h+='<div class="ctx-l" style="margin-bottom:2px">90-Day Range</div>';
@@ -353,27 +341,48 @@ h+='</div>';}
 if(m.streak&&m.streak>=2){h+='<div class="streak-badge '+(m.streak_dir||'up')+'">'+(m.streak_dir==='up'?'\u25B2':'\u25BC')+' '+m.streak+' day streak</div>';}
 if(m.avg_daily_range){h+='<div class="ctx-row" style="margin-top:6px"><span class="ctx-l">Avg Daily Range (10d)</span><span class="ctx-v">'+m.avg_daily_range.toFixed(2)+'c</span></div>';
 if(m.vol_vs_avg)h+='<div class="ctx-row"><span class="ctx-l">Today vs Avg Range</span><span class="ctx-v" style="color:'+(m.vol_vs_avg>1.5?'var(--y)':'var(--tx)')+'">'+m.vol_vs_avg.toFixed(1)+'x</span></div>';}
+h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
+if(d.contract_roll){var crl=d.contract_roll,fml=crl.front_month,nml=crl.next_month;
+var rlc=crl.roll_color==='red'?'var(--r)':crl.roll_color==='orange'?'var(--o)':crl.roll_color==='yellow'?'var(--y)':'var(--g)';
+h+='<div style="padding:8px 10px;background:'+(crl.roll_color==='green'?'var(--gd)':crl.roll_color==='yellow'?'var(--yd)':crl.roll_color==='orange'?'var(--od)':'var(--rd)')+';border-radius:4px;border-left:3px solid '+rlc+'">';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+rlc+'">'+crl.roll_status+'</div>';
+h+='<div style="font-size:9px;color:var(--tm);margin-top:2px">'+fml.ticker+' FND: '+fml.fnd+'</div></div>';
+if(crl.roll_urgency==='critical'||crl.roll_urgency==='warning'){
+h+='<div style="margin-top:6px;padding:6px 10px;background:var(--rd);border-radius:4px;font-size:10px;color:var(--r)">\u26A0 Liquidity migrating to '+(nml?nml.ticker:'next contract')+' \u2014 check execution quality</div>';}
+if(crl.open_interest){var oi=crl.open_interest;
+h+='<div style="margin-top:10px;border-top:1px solid var(--bd);padding-top:8px">';
+h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Open Interest</div>';
+h+='<div class="ctx-row"><span class="ctx-l">Total OI</span><span class="ctx-v">'+n(oi.total)+' contracts</span></div>';
+if(oi.trend){var otc=oi.trend==='building'?'var(--g)':oi.trend==='declining'?'var(--r)':'var(--tm)';
+var oarr=oi.trend==='building'?'\u2191':oi.trend==='declining'?'\u2193':'\u2192';
+h+='<div class="ctx-row"><span class="ctx-l">Trend</span><span class="ctx-v" style="color:'+otc+'">'+oarr+' '+oi.trend+'</span></div>';
+if(oi.change_5d!==undefined)h+='<div class="ctx-row"><span class="ctx-l">'+oi.history_days+'d Change</span><span class="ctx-v" style="color:'+otc+'">'+(oi.change_5d>0?'+':'')+n(oi.change_5d)+' ('+oi.change_5d_pct+'%)</span></div>';}
+h+='</div>';}
+}else h+='<div class="nd">Contract data unavailable</div>';
 h+='</div>';
-// GTC
-h+='<div class="pn gp" id="pn-gp"><div class="pl">GTC Suggestions</div>';
+// Signal & GTC — consolidated
+h+='<div class="pn sp" id="pn-sp"><div class="pl">Signal & GTC</div>';
+// Fix Window Meter
+if(fw){var fwc=fw.color==='green'?'var(--g)':fw.color==='red'?'var(--r)':fw.color==='orange'?'var(--o)':'var(--y)';
+h+='<div class="fw-meter"><div class="fw-header"><span class="fw-label" style="color:'+fwc+'">FIX WINDOW</span><span class="fw-score" style="color:'+fwc+'">'+fw.score+'</span></div>';
+h+='<div class="fw-bar"><div class="fw-fill" style="width:'+fw.score+'%;background:'+fwc+'"></div></div>';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+fwc+';margin-bottom:4px">'+fw.label+'</div>';
+if(fw.factors&&fw.factors.length){h+='<div class="fw-factors">';fw.factors.forEach(function(f){h+='<span class="fw-tag">'+f+'</span>';});h+='</div>';}
+h+='</div>';}
+if(fo){var fctx=fo.fixable_count+' order'+(fo.fixable_count!==1?'s':'')+' fixable now';
+if(fo.blocked_lme_count>0)fctx+=' ('+fo.blocked_lme_count+' awaiting LME)';
+h+='<div class="fw-context">'+fctx+'</div>';
+if(fw&&fw.score>=65&&fo.shipped_fixable&&fo.shipped_fixable.length>0){var top=fo.shipped_fixable[0];
+h+='<div class="fw-nudge">'+n(Math.round(top.open_lbs||top.lbs))+' lbs shipped to '+top.consumer+' \u2014 fix now?</div>';}}
+h+='<div class="sb '+s.signal_color+'">'+s.signal+'</div>';
+h+='<div class="sdt">'+s.signal_detail+'</div><div style="font-size:10px;color:var(--td);margin-top:5px">'+s.move_desc+'</div>';
+if(s.momentum_note)h+='<div style="font-size:10px;color:var(--p);margin-top:6px">'+s.momentum_note+'</div>';
+if(s.dxy_signal&&s.dxy_signal.direction!=='flat'){var dsc=s.dxy_signal.color;h+='<div style="font-size:10px;color:var(--'+dsc+');margin-top:4px">'+s.dxy_signal.msg+'</div>';}
+if(s.spread_signal){var ssc=s.spread_signal.color;h+='<div class="arb-box" style="border-left-color:var(--'+ssc+')"><div class="arb-dir" style="color:var(--'+ssc+')">'+s.spread_signal.direction+'</div><div class="arb-msg">'+s.spread_signal.msg+'</div></div>';}
+h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 if(cfg.fix_target)h+='<div class="tl"><span class="tll">Fix Target</span><span class="tlv">$'+cfg.fix_target.toFixed(2)+'</span></div>';
 if(gtc.length>0){gtc.forEach(function(g){h+='<div class="gi '+g.urgency+'"><div class="ga '+g.urgency+'">'+g.action+'</div><div class="gd">'+g.detail+'</div></div>';});}
-else h+='<div class="nd">No suggestions</div>';
-h+='</div>';
-// Position
-h+='<div class="pn posp" id="pn-posp"><div class="pl">Position</div>';
-if(r){var mc=r.mtm_pl>=0?'pos':'neg';
-h+='<div class="pg"><div class="pk"><div class="pkl">Net Unpriced Long</div><div class="pkv">'+n(Math.round(r.net_lbs))+' lbs</div><div class="pks">'+r.loads_unpriced+' loads</div></div>';
-h+='<div class="pk"><div class="pkl">Avg Cost</div><div class="pkv">$'+r.avg_cost.toFixed(4)+'</div></div>';
-h+='<div class="pk"><div class="pkl">Hedged</div><div class="pkv">'+r.hedge_pct+'%</div></div>';
-h+='<div class="pk"><div class="pkl">Mark-to-Market</div><div class="pkv '+mc+'">$'+n(Math.round(r.mtm_pl))+'</div></div></div>';
-if(r.baseline_deviation!==undefined&&r.baseline_deviation!==null){var bd=r.baseline_deviation,abd=Math.abs(bd),bl=r.baseline_lbs,tl=cfg.truckload_lbs||42000;
-var bclr=abd<=tl?'var(--g)':abd<=tl*3?'var(--tx)':'var(--r)';
-var bdir=bd>0?'over':bd<0?'under':'on target';
-var btxt=bd===0?'On target':'<span style="font-family:JetBrains Mono,monospace;font-weight:700;color:'+bclr+'">'+(bd>0?'+':'')+n(Math.round(bd))+' '+bdir+'</span>';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;border-left:3px solid '+bclr+'"><span style="font-size:10px;color:var(--tm)">vs Baseline ('+n(bl)+')</span>'+btxt+'</div>';}
-if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">As of: '+pos.updated+'</div>';
-}else h+='<div class="nd">Drop Hedge xlsx into data/</div>';
+else h+='<div class="nd">No GTC suggestions</div>';
 h+='</div>';
 // Sales Orders
 h+='<div class="pn slp" id="pn-slp"><div class="pl">Sales Orders</div>';
@@ -406,8 +415,8 @@ h+='</div>';}
 if(r.priced_sales_avg>0)h+='<div class="rs" style="margin-top:6px"><span class="rsl">Avg priced</span><span class="rsv">$'+r.priced_sales_avg.toFixed(4)+'</span></div>';
 }else h+='<div class="nd">No sales data</div>';
 h+='</div>';
-// Sales Position (supply vs demand)
-h+='<div class="pn sap" id="pn-sap"><div class="pl">Sales Position</div>';
+// Sales & Margin — consolidated: Sales Position + Margin
+h+='<div class="pn sap" id="pn-sap"><div class="pl">Sales & Margin</div>';
 if(r&&r.total_inv_po>0){
 var sup=r.total_inv_po,dem=r.total_sales_lbs,mx=Math.max(sup,dem)||1;
 var supW=Math.round(sup/mx*100),demW=Math.round(dem/mx*100);
@@ -445,49 +454,16 @@ h+='<span style="flex:1">Still to chop</span><span style="width:55px;text-align:
 if(r.po_lbs>0){h+='<div style="display:flex;font-size:9px;padding:4px 2px;color:var(--tm);border-bottom:1px solid var(--bd)">';
 h+='<span style="flex:1">+ POs not yet received</span><span style="width:55px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.po_lbs))+'</span><span style="width:120px"></span></div>';}
 h+='</div>';
-}else h+='<div class="nd">No supply data</div>';
-h+='</div>';
-// Margin & Risk — consolidated panel
-h+='<div class="pn mgp" id="pn-mgp"><div class="pl">Margin & Risk</div>';
+h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 var mp=d.margin_projection;
-if(mp){
-var gmCls=mp.gross_margin_per_lb>=0?'pos':'neg';
+if(mp){var gmCls=mp.gross_margin_per_lb>=0?'pos':'neg';
 h+='<div style="display:flex;justify-content:space-between;align-items:baseline;padding:10px 0;margin-bottom:6px;border-bottom:1px solid var(--bd)"><span style="font-size:13px;font-weight:600;color:var(--tx)">Gross Margin/lb</span><span class="'+gmCls+'" style="font-family:JetBrains Mono,monospace;font-size:20px;font-weight:700">$'+mp.gross_margin_per_lb.toFixed(4)+'</span></div>';
 h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px;margin-bottom:3px"><span style="font-size:10px;color:var(--td)">Avg Sell Price</span><span style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--tm)">$'+mp.avg_sell_price.toFixed(4)+'</span></div>';
 h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px;margin-bottom:3px"><span style="font-size:10px;color:var(--td)">Avg Cost/lb</span><span style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--tm)">$'+mp.avg_cost.toFixed(4)+'</span></div>';
 h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px;margin-bottom:3px"><span style="font-size:10px;color:var(--td)">Total Gross Margin</span><span class="'+gmCls+'" style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:600">$'+n(Math.round(mp.total_gross_margin))+'</span></div>';
 h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;background:var(--sf2);border-radius:3px"><span style="font-size:10px;color:var(--td)">Margin %</span><span class="'+gmCls+'" style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:600">'+mp.margin_pct.toFixed(1)+'%</span></div>';
-}else h+='<div class="nd">Need position + market data</div>';
-// Exposure section divider + risk data
-h+='<div style="border-top:1px solid var(--bd);margin-top:10px;padding-top:10px">';
-if(r){var hp=Math.min(r.hedge_pct,100),bc=hp>70?'var(--g)':hp>30?'var(--y)':'var(--r)';
-h+='<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:var(--tm)">Hedge Coverage</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+r.hedge_pct+'%</span></div>';
-h+='<div class="rbg"><div class="rbf" style="width:'+hp+'%;background:'+bc+'"></div></div></div>';
-h+='<div class="rs"><span class="rsl">Unhedged</span><span class="rsv">'+n(Math.round(r.unhedged_lbs))+' lbs</span></div>';
-h+='<div class="rs"><span class="rsl">Per 1c move</span><span class="rsv">$'+n(Math.round(Math.abs(r.risk_per_cent)))+'</span></div>';
-h+='<div class="rs"><span class="rsl">Per 10c move</span><span class="rsv" style="color:'+(Math.abs(r.risk_per_dime)>10000?'var(--r)':'var(--tx)')+'">$'+n(Math.round(Math.abs(r.risk_per_dime)))+'</span></div>';
-}else h+='<div class="nd">Load position to see risk</div>';
-h+='</div>';
-h+='</div>';
-// Contract Roll — FND + OI only (prices consolidated in COMEX panel)
-h+='<div class="pn rlp" id="pn-rlp"><div class="pl">Contract Roll</div>';
-if(d.contract_roll){var crl=d.contract_roll,fml=crl.front_month,nml=crl.next_month;
-var rlc=crl.roll_color==='red'?'var(--r)':crl.roll_color==='orange'?'var(--o)':crl.roll_color==='yellow'?'var(--y)':'var(--g)';
-h+='<div style="padding:8px 10px;background:'+(crl.roll_color==='green'?'var(--gd)':crl.roll_color==='yellow'?'var(--yd)':crl.roll_color==='orange'?'var(--od)':'var(--rd)')+';border-radius:4px;border-left:3px solid '+rlc+'">';
-h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+rlc+'">'+crl.roll_status+'</div>';
-h+='<div style="font-size:9px;color:var(--tm);margin-top:2px">'+fml.ticker+' FND: '+fml.fnd+'</div></div>';
-if(crl.roll_urgency==='critical'||crl.roll_urgency==='warning'){
-h+='<div style="margin-top:6px;padding:6px 10px;background:var(--rd);border-radius:4px;font-size:10px;color:var(--r)">\u26A0 Liquidity migrating to '+(nml?nml.ticker:'next contract')+' \u2014 check execution quality</div>';}
-if(crl.open_interest){var oi=crl.open_interest;
-h+='<div style="margin-top:10px;border-top:1px solid var(--bd);padding-top:8px">';
-h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Open Interest</div>';
-h+='<div class="ctx-row"><span class="ctx-l">Total OI</span><span class="ctx-v">'+n(oi.total)+' contracts</span></div>';
-if(oi.trend){var otc=oi.trend==='building'?'var(--g)':oi.trend==='declining'?'var(--r)':'var(--tm)';
-var oarr=oi.trend==='building'?'\u2191':oi.trend==='declining'?'\u2193':'\u2192';
-h+='<div class="ctx-row"><span class="ctx-l">Trend</span><span class="ctx-v" style="color:'+otc+'">'+oarr+' '+oi.trend+'</span></div>';
-if(oi.change_5d!==undefined)h+='<div class="ctx-row"><span class="ctx-l">'+oi.history_days+'d Change</span><span class="ctx-v" style="color:'+otc+'">'+(oi.change_5d>0?'+':'')+n(oi.change_5d)+' ('+oi.change_5d_pct+'%)</span></div>';}
-h+='</div>';}
-}else h+='<div class="nd">Contract data unavailable</div>';
+}else h+='<div class="nd">Need position + market data for margin</div>';
+}else h+='<div class="nd">No supply data</div>';
 h+='</div>';
 // Decisions — recap at bottom with jump-to-section links
 h+='<div class="pn dp s2" id="pn-dp"><div class="pl">What To Do</div><div class="dl">';
@@ -495,12 +471,13 @@ function decSec(t){
 if(/FIX WINDOW|LIQUIDATION|FLASH|DIP|BIG.DROP|momentum/i.test(t))return 'pn-sp';
 if(/SHFE|DXY|dollar|Fed:|warehouse|COMEX.*LME|parity|arb/i.test(t))return 'pn-pp';
 if(/shipped.*UNPRICED|UNPRICED.*shipped/i.test(t))return 'pn-slp';
-if(/TARGET|approaching|GTC/i.test(t))return 'pn-gp';
+if(/TARGET|approaching|GTC/i.test(t))return 'pn-sp';
 if(/Support|Resistance/i.test(t))return 'pn-tp';
-if(/migrating|roll/i.test(t))return 'pn-rlp';
-if(/Long.*unpriced|unpriced.*long/i.test(t))return 'pn-rp';
+if(/migrating|roll/i.test(t))return 'pn-tp';
+if(/Long.*unpriced|unpriced.*long/i.test(t))return 'pn-posp';
 if(/baseline/i.test(t))return 'pn-posp';
 if(/pipeline.*thin|need to sell/i.test(t))return 'pn-sap';
+if(/margin/i.test(t))return 'pn-sap';
 if(/COMEX:.*MT|LME:.*MT|Global:/i.test(t))return 'pn-pp';
 return null;}
 dec.forEach(function(d){var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRICED')>=0)cls='di warn';
