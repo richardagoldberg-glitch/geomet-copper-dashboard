@@ -43,6 +43,15 @@ COMEX_WAREHOUSE_MT = 534000
 COMEX_WAREHOUSE_DATE = "2026-02-14"
 COMEX_WAREHOUSE_TREND = "building"   # "building" or "drawing"
 
+# Customer fix-pricing availability windows (local time, 24h format)
+# "start"/"end" in your local hours; overnight windows wrap (e.g. 19-10 = 7PM to 10AM)
+# "basis" is the default pricing basis for that customer
+CUSTOMER_HOURS = {
+    "OM Commodities": {"start": 7, "end": 13, "basis": "LME"},
+    "Citic":          {"start": 19, "end": 10, "basis": "LME"},   # Singapore — overnight
+    "Sims":           {"start": 7, "end": 16, "basis": "COMEX"},
+}
+
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 
 # Current Fed Funds target rate (used as fallback when FRED_API_KEY is empty)

@@ -40,6 +40,7 @@ def load_config():
         "COMEX_WAREHOUSE_TREND": "", "FRED_API_KEY": "",
         "FED_FUNDS_RATE": "4.25-4.50", "FED_FUNDS_MIDPOINT": 4.375,
         "MONTHLY_FLOW": {"Chops": 171800, "BB": 162700, "#2": 106600, "#1": 82700},
+        "CUSTOMER_HOURS": {},
     }
     if cfg_path.exists():
         try:
@@ -490,6 +491,65 @@ def get_lme_status():
         return {"status": "OPEN", "detail": "LME OPEN", "color": "green", "session": "electronic"}
 
     return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "closed"}
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# CUSTOMER AVAILABILITY — fix-pricing windows
+# ---------------------------------------------------------------------------
+def get_customer_availability():
+    """Check which customers are available to fix prices right now."""
+    hours_cfg = CFG.get("CUSTOMER_HOURS", {})
+    if not hours_cfg:
+        return {}
+    now = datetime.now()
+    hr = now.hour
+    result = {}
+    for name, info in hours_cfg.items():
+        s, e = info["start"], info["end"]
+        # Overnight window (e.g. 19-10 means 7PM to 10AM)
+        if s > e:
+            available = hr >= s or hr < e
+        else:
+            available = s <= hr < e
+        result[name] = {
+            "available": available,
+            "hours": f"{s % 12 or 12}{'am' if s < 12 else 'pm'}-{e % 12 or 12}{'am' if e < 12 else 'pm'}",
+            "basis": info.get("basis", ""),
+        }
+    return result
+
+
+# ---------------------------------------------------------------------------
+# COMEX STATUS — Globex hours (Chicago/Central time)
+# ---------------------------------------------------------------------------
+def get_comex_status():
+    """COMEX Globex hours: Sun 5PM CT - Fri 4PM CT, daily break 4-5PM CT Mon-Thu."""
+    import zoneinfo
+    try:
+        chicago = zoneinfo.ZoneInfo("America/Chicago")
+    except Exception:
+        from datetime import timezone, timedelta
+        chicago = timezone(timedelta(hours=-6))
+    now_ct = datetime.now(chicago)
+    wd = now_ct.weekday()  # 0=Mon
+    hr = now_ct.hour
+    mn = now_ct.minute
+    t = hr * 60 + mn
+
+    # Weekend: closed from Fri 4PM CT (wd=4, t>=960) to Sun 5PM CT (wd=6, t>=1020)
+    if wd == 5:  # Saturday — always closed
+        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend"}
+    if wd == 6 and t < 1020:  # Sunday before 5PM CT
+        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend"}
+    if wd == 4 and t >= 960:  # Friday 4PM+ CT
+        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend"}
+
+    # Daily maintenance break: 4PM-5PM CT (960-1020) Mon-Thu
+    if 960 <= t < 1020 and wd <= 3:
+        return {"status": "CLOSED", "detail": "COMEX MAINT", "color": "yellow", "reason": "maintenance"}
+
+    return {"status": "OPEN", "detail": "COMEX OPEN", "color": "green", "reason": "globex"}
 
 
 # ---------------------------------------------------------------------------
@@ -1500,6 +1560,7 @@ def fetch_copper_data():
         dxy = fetch_dxy()
         china = get_china_status()
         lme_status = get_lme_status()
+        comex_status = get_comex_status()
         fed = fetch_fed_data()
         warehouse = get_warehouse_data()
 
@@ -1530,7 +1591,8 @@ def fetch_copper_data():
             "range_90d": [round(range_90d_low, 4), round(range_90d_high, 4)],
             "roc": roc, "streak": streak, "streak_dir": streak_dir,
             "avg_daily_range": avg_daily_range, "vol_vs_avg": vol_vs_avg,
-            "support_resistance": sr, "dxy": dxy, "china": china, "lme": lme_status,
+            "support_resistance": sr, "dxy": dxy, "china": china, "lme": lme_status, "comex": comex_status,
+            "customer_availability": get_customer_availability(),
             "fed": fed, "warehouse": warehouse, "daily_prev_settle": round(_daily_prev_settle, 4),
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }

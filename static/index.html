@@ -23,7 +23,7 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 @keyframes p{0%,100%{opacity:1}50%{opacity:.4}}
 .ch-badge{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;padding:3px 7px;border-radius:3px;letter-spacing:0.5px}
 .ch-badge.open{background:var(--gd);color:var(--g)}.ch-badge.closed{background:var(--rd);color:var(--r)}.ch-badge.warn{background:var(--yd);color:var(--y)}
-.db{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--bd);margin:1px}
+.db{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--bd);margin:1px;align-items:start}
 .pn{background:var(--sf);padding:20px 22px}
 .pl{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--td);margin-bottom:14px;display:flex;align-items:center;gap:6px}
 .pl::before{content:'';width:3px;height:10px;border-radius:1px}
@@ -77,7 +77,10 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .sli{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--tm)}
 .sld{width:6px;height:6px;border-radius:2px}
 .dl{display:grid;gap:7px}
-.di{padding:9px 10px;background:var(--sf2);border-radius:4px;font-size:12px;line-height:1.4;border-left:3px solid var(--cu)}
+.di{padding:9px 10px;background:var(--sf2);border-radius:4px;font-size:12px;line-height:1.4;border-left:3px solid var(--cu);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.di-txt{flex:1;min-width:0}
+.di-jump{flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--bd);color:var(--tm);font-size:11px;cursor:pointer;transition:background .15s,color .15s}
+.di-jump:hover{background:var(--cu);color:var(--tx)}
 .di.warn{border-left-color:var(--r);background:rgba(255,71,87,.06)}
 .di.fix-good{border-left-color:var(--g);background:rgba(0,229,155,.06)}
 .di.fix-bad{border-left-color:var(--r);background:rgba(255,71,87,.06)}
@@ -137,6 +140,8 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .so-lbs{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;width:52px;text-align:right;flex-shrink:0}
 .so-basis{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;letter-spacing:.5px;flex-shrink:0;white-space:nowrap}
 .so-basis.comex{background:var(--cg);color:var(--cu)}.so-basis.lme{background:var(--bdd);color:var(--b)}
+.so-avail{flex-shrink:0;font-size:8px;width:12px;text-align:center}
+.so-avail.live{color:var(--g)}.so-avail.off{color:var(--td)}
 .fw-context{padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;font-size:10px;color:var(--tm)}
 .fw-nudge{padding:8px 10px;background:rgba(0,229,155,.08);border:1px dashed rgba(0,229,155,.3);border-radius:4px;margin-top:6px;font-size:10px;color:var(--g);font-weight:500}
 .arb-tag{display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:3px;margin-left:6px}
@@ -144,7 +149,52 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .arb-tag.parity{background:var(--sf2);color:var(--tm);border:1px solid var(--bd)}
 @media(max-width:1400px){.db{grid-template-columns:1fr 1fr 1fr}.s2{grid-column:span 1}}
 @media(max-width:1000px){.db{grid-template-columns:1fr 1fr}}
-@media(max-width:700px){.db{grid-template-columns:1fr}.pv{font-size:28px}}
+@media(max-width:700px){
+.db{grid-template-columns:1fr;gap:0}
+.s2{grid-column:span 1}
+/* Mobile panel order — most actionable first */
+.pn.pp{order:1} /* COMEX/LME prices */
+.pn.rp{order:2} /* Morning Report — unpriced long hero */
+.pn.sp{order:3} /* Signal + Fix Window */
+.pn.slp{order:4} /* Sales Orders */
+.pn.dp{order:13} /* What To Do — last, recap */
+.pn.posp{order:6} /* Position */
+.pn.mgp{order:7} /* Margin & Risk */
+.pn.gp{order:8} /* GTC */
+.pn.tp{order:9} /* Trend */
+.pn.cp{order:10} /* Price Context */
+.pn.sap{order:11} /* Sales Position */
+.pn.rlp{order:12} /* Contract Roll */
+/* Compact spacing */
+.pn{padding:14px 16px}
+.pl{margin-bottom:10px;font-size:8px}
+.pv{font-size:28px}
+.pc{font-size:11px}
+.hdr{padding:10px 16px;flex-wrap:wrap;gap:8px}
+.hdr-t{font-size:11px}
+.hdr-r{gap:8px;flex-wrap:wrap}
+.ch-badge{font-size:8px;padding:2px 5px}
+.ri{font-size:9px}
+/* Charts taller on mobile for thumb readability */
+.mc-chart{height:56px}
+/* Fix window */
+.fw-meter{padding:10px}
+.fw-score{font-size:18px}
+/* Sales order rows */
+.so-row{padding:6px 8px;font-size:10px}
+.so-scroll{max-height:200px}
+/* Position grid */
+.pg{grid-template-columns:1fr 1fr;gap:5px}
+.pk{padding:7px 8px}
+.pkv{font-size:13px}
+/* Decisions */
+.di{padding:8px 10px;font-size:11px}
+/* Context row stack on narrow */
+.mc-ctx{flex-direction:column;gap:4px}
+/* Arb box */
+.arb-box{padding:8px}
+.arb-msg{font-size:10px}
+}
 body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--tm:#5a6577;--td:#8494a7;
 --g:#00a86b;--gd:rgba(0,168,107,.12);--r:#d63447;--rd:rgba(214,52,71,.12);
 --y:#c99000;--yd:rgba(201,144,0,.12);--o:#cc6a2a;--od:rgba(204,106,42,.12);
@@ -156,7 +206,7 @@ body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--t
 </head>
 <body>
 <div class="hdr"><div class="hdr-l"><div class="logo"><img src="/logo.png" alt="Geomet"></div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
-<div class="hdr-r"><div id="lme" class="ch-badge closed"></div><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
+<div class="hdr-r"><div id="cmx" class="ch-badge closed" style="display:none"></div><div id="lme" class="ch-badge closed"></div><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
 <div class="db" id="db"><div class="ld"><div class="ls"></div>Fetching copper data...</div></div>
 <script>
 function applyTheme(t){if(t==='light')document.body.classList.add('light');else document.body.classList.remove('light');var b=document.getElementById('thm');if(b)b.textContent=t==='light'?'\u2600\uFE0F':'\uD83C\uDF19'}
@@ -175,6 +225,9 @@ $('ch').className='ch-badge '+chc;$('ch').textContent=ch.status==='OPEN'?'SHFE O
 if(m&&m.lme){var lm=m.lme,lmc=lm.status==='CLOSED'?'warn':lm.session==='ring'?'open':'open';
 $('lme').className='ch-badge '+lmc;$('lme').textContent=lm.detail;
 if(lm.session==='ring')$('lme').style.fontWeight='800';else $('lme').style.fontWeight='';}
+if(m&&m.comex){var cmx=m.comex,cmxEl=$('cmx');
+if(cmx.status==='CLOSED'){cmxEl.style.display='';cmxEl.className='ch-badge closed';cmxEl.textContent=cmx.detail;}
+else{cmxEl.style.display='none';}}
 if(!m||!s){$('db').innerHTML='<div class="ld">Unable to fetch data.</div>';return}
 var cc=m.change>=0?'up':'dn',cs=m.change>=0?'+':'',h='',cr=d.contract_roll;
 var ac=m.active_contract||'front'; // which contract the big price represents
@@ -183,7 +236,7 @@ var ac=m.active_contract||'front'; // which contract the big price represents
 var acLabel='HG';
 if(cr){if(ac==='next'&&cr.next_month)acLabel=cr.next_month.ticker+' ('+cr.next_month.label+')';
 else acLabel=cr.front_month.ticker+' ('+cr.front_month.label+')';}
-h+='<div class="pn pp"><div class="pl">COMEX Copper \u2014 '+acLabel+'</div><div class="pm"><div class="pv">'+m.price.toFixed(4)+'</div><div class="pu">$/lb</div>';
+h+='<div class="pn pp" id="pn-pp"><div class="pl">COMEX Copper \u2014 '+acLabel+'</div><div class="pm"><div class="pv">'+m.price.toFixed(4)+'</div><div class="pu">$/lb</div>';
 h+='<div class="pc '+cc+'">'+cs+m.change.toFixed(4)+' ('+cs+m.change_pct.toFixed(2)+'%)</div></div>';
 h+='<div class="ps">Prev settle: '+m.prev_close.toFixed(4)+(m.copper_source?' <span style="font-size:8px;color:var(--td)">via '+m.copper_source+'</span>':'')+'</div>';
 // Contango/backwardation — single clean line
@@ -226,7 +279,7 @@ h+='<div class="mc-ctx-item"><span class="mc-ctx-l">Fed</span><span class="mc-ct
 h+='</div>';
 h+='</div>';
 // Morning Report
-h+='<div class="pn rp"><div class="pl">Morning Report</div>';
+h+='<div class="pn rp" id="pn-rp"><div class="pl">Morning Report</div>';
 if(r&&r.total_inv_po>0){
 var unprShip=r.sales_unpriced_shipped_lbs||0;
 var invPo=r.total_inv_po;
@@ -238,22 +291,17 @@ var bal=noPriceLbs-hedgeLbs;
 var balClr=bal>0?'var(--r)':'var(--g)',balLbl=bal>0?'LONG':'SHORT';
 h+='<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px"><span style="font-family:JetBrains Mono,monospace;font-size:28px;font-weight:700;color:'+balClr+'">'+n(Math.abs(Math.round(bal)))+'</span><span style="font-size:11px;color:var(--td)">lbs</span></div>';
 h+='<div style="font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;letter-spacing:1px;color:'+balClr+';margin-bottom:12px">UNPRICED '+balLbl+'</div>';
-h+='<div class="dl">';
-h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--b)"><span>Inventory Copper</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(r.inventory_cu_lbs))+'</span></div>';
-h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--b)"><span>PO Waiting to be Received</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(r.po_lbs))+'</span></div>';
-h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--y)"><span>Unpriced Shipments add back</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(unprShip))+'</span></div>';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid var(--cu);border-top:2px solid var(--bd)"><span style="font-weight:700">Total Inv/PO</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:16px">'+n(Math.round(invPo))+'</span></div>';
-h+='<div style="height:8px"></div>';
-h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--g)"><span>Priced SO Unshipped</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(pricedUn))+'</span></div>';
-h+='<div style="height:4px"></div>';
-h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--p)"><span>Inv/PO with No Sell Price</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+n(Math.round(noPriceLbs))+'</span></div>';
-h+='<div class="di" style="display:flex;justify-content:space-between;align-items:center;border-left-color:var(--p)"><span>Hedge to Balance</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px">'+hedgeLots+' Lots \u2014 '+n(Math.round(hedgeLbs))+' LBS</span></div>';
+h+='<div style="font-size:10px;line-height:1.6">';
+h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>Inv <span style="color:var(--td)">'+n(Math.round(r.inventory_cu_lbs))+'</span> + PO <span style="color:var(--td)">'+n(Math.round(r.po_lbs))+'</span>'+(unprShip>0?' + Ship <span style="color:var(--td)">'+n(Math.round(unprShip))+'</span>':'')+'</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;color:var(--cu)">'+n(Math.round(invPo))+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>\u2212 Priced SO</span><span style="font-family:JetBrains Mono,monospace;font-weight:600;color:var(--g)">'+n(Math.round(pricedUn))+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--bd);color:var(--tm)"><span>= Unpriced Exposure</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;color:var(--p)">'+n(Math.round(noPriceLbs))+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>Hedge</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+hedgeLots+' lots / '+n(Math.round(hedgeLbs))+' lbs</span></div>';
 h+='</div>';
 if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">Source: '+pos.source_file+' \u2014 '+pos.updated+'</div>';
 }else h+='<div class="nd">No position data</div>';
 h+='</div>';
 // Trend + S/R
-h+='<div class="pn tp"><div class="pl">Trend</div><div class="mg">';
+h+='<div class="pn tp" id="pn-tp"><div class="pl">Trend</div><div class="mg">';
 [['50 DMA',m.ma50,s.above_50],['100 DMA',m.ma100,s.above_100],['200 DMA',m.ma200,s.above_200]].forEach(function(x){
 h+='<div class="mr '+(x[2]?'a':'bl')+'"><span class="ml">'+x[0]+'</span><span class="mv">'+x[1].toFixed(4)+'</span><span class="ms '+(x[2]?'a':'bl')+'">'+(x[2]?'ABOVE':'BELOW')+'</span></div>';});
 h+='</div><div style="margin-top:10px"><div class="mt">'+s.trend+' ('+s.trend_strength+')</div> <div class="mt" style="margin-left:3px">'+s.move_type+'</div></div>';
@@ -266,7 +314,7 @@ if(sr.support)sr.support.forEach(function(s){h+='<div class="sr-row sup"><span c
 h+='</div>';}}
 h+='</div>';
 // Signal + Fix Window
-h+='<div class="pn sp"><div class="pl">Signal</div>';
+h+='<div class="pn sp" id="pn-sp"><div class="pl">Signal</div>';
 // Fix Window Meter
 if(fw){var fwc=fw.color==='green'?'var(--g)':fw.color==='red'?'var(--r)':fw.color==='orange'?'var(--o)':'var(--y)';
 h+='<div class="fw-meter"><div class="fw-header"><span class="fw-label" style="color:'+fwc+'">FIX WINDOW</span><span class="fw-score" style="color:'+fwc+'">'+fw.score+'</span></div>';
@@ -286,7 +334,7 @@ if(s.dxy_signal&&s.dxy_signal.direction!=='flat'){var dsc=s.dxy_signal.color;h+=
 if(s.spread_signal){var ssc=s.spread_signal.color;h+='<div class="arb-box" style="border-left-color:var(--'+ssc+')"><div class="arb-dir" style="color:var(--'+ssc+')">'+s.spread_signal.direction+'</div><div class="arb-msg">'+s.spread_signal.msg+'</div></div>';}
 h+='</div>';
 // Price Context
-h+='<div class="pn cp"><div class="pl">Price Context</div>';
+h+='<div class="pn cp" id="pn-cp"><div class="pl">Price Context</div>';
 if(m.range_90d){var r90l=m.range_90d[0],r90h=m.range_90d[1],r90r=r90h-r90l;
 var ppos=r90r>0?((m.price-r90l)/r90r*100):50;
 h+='<div class="ctx-l" style="margin-bottom:2px">90-Day Range</div>';
@@ -307,13 +355,13 @@ if(m.avg_daily_range){h+='<div class="ctx-row" style="margin-top:6px"><span clas
 if(m.vol_vs_avg)h+='<div class="ctx-row"><span class="ctx-l">Today vs Avg Range</span><span class="ctx-v" style="color:'+(m.vol_vs_avg>1.5?'var(--y)':'var(--tx)')+'">'+m.vol_vs_avg.toFixed(1)+'x</span></div>';}
 h+='</div>';
 // GTC
-h+='<div class="pn gp"><div class="pl">GTC Suggestions</div>';
+h+='<div class="pn gp" id="pn-gp"><div class="pl">GTC Suggestions</div>';
 if(cfg.fix_target)h+='<div class="tl"><span class="tll">Fix Target</span><span class="tlv">$'+cfg.fix_target.toFixed(2)+'</span></div>';
 if(gtc.length>0){gtc.forEach(function(g){h+='<div class="gi '+g.urgency+'"><div class="ga '+g.urgency+'">'+g.action+'</div><div class="gd">'+g.detail+'</div></div>';});}
 else h+='<div class="nd">No suggestions</div>';
 h+='</div>';
 // Position
-h+='<div class="pn posp"><div class="pl">Position</div>';
+h+='<div class="pn posp" id="pn-posp"><div class="pl">Position</div>';
 if(r){var mc=r.mtm_pl>=0?'pos':'neg';
 h+='<div class="pg"><div class="pk"><div class="pkl">Net Unpriced Long</div><div class="pkv">'+n(Math.round(r.net_lbs))+' lbs</div><div class="pks">'+r.loads_unpriced+' loads</div></div>';
 h+='<div class="pk"><div class="pkl">Avg Cost</div><div class="pkv">$'+r.avg_cost.toFixed(4)+'</div></div>';
@@ -328,7 +376,7 @@ if(pos&&pos.updated)h+='<div class="pks" style="margin-top:6px">As of: '+pos.upd
 }else h+='<div class="nd">Drop Hedge xlsx into data/</div>';
 h+='</div>';
 // Sales Orders
-h+='<div class="pn slp"><div class="pl">Sales Orders</div>';
+h+='<div class="pn slp" id="pn-slp"><div class="pl">Sales Orders</div>';
 if(r&&(r.priced_sales_lbs>0||r.unpriced_sales_lbs>0)){
 var tt=r.priced_sales_lbs+r.unpriced_sales_lbs,pp=tt>0?(r.priced_sales_lbs/tt*100):0;
 h+='<div class="sbar"><div class="sbp" style="width:'+pp+'%"></div><div class="sbu" style="width:'+(100-pp)+'%"></div></div>';
@@ -336,15 +384,18 @@ h+='<div class="slg"><div class="sli"><div class="sld" style="background:var(--g
 h+='<div class="sli"><div class="sld" style="background:var(--p)"></div>Unpriced '+n(Math.round(r.unpriced_sales_lbs))+' lbs ('+(100-pp).toFixed(0)+'%)</div></div>';
 var shipd=pos?pos.sales_unpriced_shipped:[];
 var unshipd=pos?pos.sales_unpriced_unshipped:[];
+var cav=m.customer_availability||{};
 function soGrade(raw){var c=(raw||'').toUpperCase().replace(/\s*\(.*\)/,'');
 if(/CHOP/.test(c))return'Chops';if(/CUBB/.test(c))return'BB';if(/CU1/.test(c))return'#1';if(/CU2/.test(c))return'#2';return c.replace(/^CU/,'');}
+function soAvail(name){var ca=cav[name];if(!ca)return'';
+return ca.available?'<span class="so-avail live" title="Available '+ca.hours+'">\u25CF</span>':'<span class="so-avail off" title="Offline \u2014 hours: '+ca.hours+'">\u25CB</span>';}
+function soRow(so,cls){
+return '<div class="so-row '+cls+'">'+soAvail(so.consumer)+'<span class="so-cust">'+so.consumer+'</span><span class="so-comm">'+soGrade(so.commodity)+'</span><span class="so-lbs">'+n(Math.round(so.open_lbs||so.lbs))+'</span><span class="so-basis '+(so.basis||'COMEX').toLowerCase()+'">'+(so.basis||'COMEX')+'</span></div>';}
 if(shipd&&shipd.length>0){h+='<div class="so-section"><div class="so-hdr ship">\u26A0 SHIPPED \u2014 FIX PRIORITY</div>';
-shipd.forEach(function(so){
-h+='<div class="so-row shipped"><span class="so-cust">'+so.consumer+'</span><span class="so-comm">'+soGrade(so.commodity)+'</span><span class="so-lbs">'+n(Math.round(so.open_lbs||so.lbs))+'</span><span class="so-basis '+(so.basis||'COMEX').toLowerCase()+'">'+(so.basis||'COMEX')+'</span></div>';});
+shipd.forEach(function(so){h+=soRow(so,'shipped');});
 h+='</div>';}
 if(unshipd&&unshipd.length>0){h+='<div class="so-section"><div class="so-hdr unship">UNSHIPPED \u2014 OPEN</div><div class="so-scroll">';
-unshipd.forEach(function(so){
-h+='<div class="so-row unshipped"><span class="so-cust">'+so.consumer+'</span><span class="so-comm">'+soGrade(so.commodity)+'</span><span class="so-lbs">'+n(Math.round(so.open_lbs||so.lbs))+'</span><span class="so-basis '+(so.basis||'COMEX').toLowerCase()+'">'+(so.basis||'COMEX')+'</span></div>';});
+unshipd.forEach(function(so){h+=soRow(so,'unshipped');});
 h+='</div></div>';}
 if((!shipd||shipd.length===0)&&(!unshipd||unshipd.length===0)){
 h+='<div style="margin-top:2px">';
@@ -356,7 +407,7 @@ if(r.priced_sales_avg>0)h+='<div class="rs" style="margin-top:6px"><span class="
 }else h+='<div class="nd">No sales data</div>';
 h+='</div>';
 // Sales Position (supply vs demand)
-h+='<div class="pn sap"><div class="pl">Sales Position</div>';
+h+='<div class="pn sap" id="pn-sap"><div class="pl">Sales Position</div>';
 if(r&&r.total_inv_po>0){
 var sup=r.total_inv_po,dem=r.total_sales_lbs,mx=Math.max(sup,dem)||1;
 var supW=Math.round(sup/mx*100),demW=Math.round(dem/mx*100);
@@ -398,7 +449,7 @@ if(thinGrades.length>0){h+='<div style="margin-top:6px;padding:6px 8px;backgroun
 }else h+='<div class="nd">No supply data</div>';
 h+='</div>';
 // Margin & Risk — consolidated panel
-h+='<div class="pn mgp"><div class="pl">Margin & Risk</div>';
+h+='<div class="pn mgp" id="pn-mgp"><div class="pl">Margin & Risk</div>';
 var mp=d.margin_projection;
 if(mp){
 var gmCls=mp.gross_margin_per_lb>=0?'pos':'neg';
@@ -420,7 +471,7 @@ h+='<div class="rs"><span class="rsl">Per 10c move</span><span class="rsv" style
 h+='</div>';
 h+='</div>';
 // Contract Roll — FND + OI only (prices consolidated in COMEX panel)
-h+='<div class="pn rlp"><div class="pl">Contract Roll</div>';
+h+='<div class="pn rlp" id="pn-rlp"><div class="pl">Contract Roll</div>';
 if(d.contract_roll){var crl=d.contract_roll,fml=crl.front_month,nml=crl.next_month;
 var rlc=crl.roll_color==='red'?'var(--r)':crl.roll_color==='orange'?'var(--o)':crl.roll_color==='yellow'?'var(--y)':'var(--g)';
 h+='<div style="padding:8px 10px;background:'+(crl.roll_color==='green'?'var(--gd)':crl.roll_color==='yellow'?'var(--yd)':crl.roll_color==='orange'?'var(--od)':'var(--rd)')+';border-radius:4px;border-left:3px solid '+rlc+'">';
@@ -439,11 +490,25 @@ if(oi.change_5d!==undefined)h+='<div class="ctx-row"><span class="ctx-l">'+oi.hi
 h+='</div>';}
 }else h+='<div class="nd">Contract data unavailable</div>';
 h+='</div>';
-// Decisions
-h+='<div class="pn dp s2"><div class="pl">What To Do</div><div class="dl">';
+// Decisions — recap at bottom with jump-to-section links
+h+='<div class="pn dp s2" id="pn-dp"><div class="pl">What To Do</div><div class="dl">';
+function decSec(t){
+if(/FIX WINDOW|LIQUIDATION|FLASH|DIP|BIG.DROP|momentum/i.test(t))return 'pn-sp';
+if(/SHFE|DXY|dollar|Fed:|warehouse|COMEX.*LME|parity|arb/i.test(t))return 'pn-pp';
+if(/shipped.*UNPRICED|UNPRICED.*shipped/i.test(t))return 'pn-slp';
+if(/TARGET|approaching|GTC/i.test(t))return 'pn-gp';
+if(/Support|Resistance/i.test(t))return 'pn-tp';
+if(/migrating|roll/i.test(t))return 'pn-rlp';
+if(/Long.*unpriced|unpriced.*long/i.test(t))return 'pn-rp';
+if(/baseline/i.test(t))return 'pn-posp';
+if(/pipeline.*thin|need to sell/i.test(t))return 'pn-sap';
+if(/COMEX:.*MT|LME:.*MT|Global:/i.test(t))return 'pn-pp';
+return null;}
 dec.forEach(function(d){var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRICED')>=0)cls='di warn';
 if(d.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d.indexOf('\uD83D\uDD34')>=0)cls='di fix-bad';
-h+='<div class="'+cls+'">'+d+'</div>';});
+var sec=decSec(d),jmp='';
+if(sec)jmp='<span class="di-jump" onclick="document.getElementById(\''+sec+'\').scrollIntoView({behavior:\'smooth\',block:\'start\'})" title="Jump to section">\u2191</span>';
+h+='<div class="'+cls+'"><span class="di-txt">'+d+'</span>'+jmp+'</div>';});
 h+='</div></div>';
 $('db').innerHTML=h;
 // Render mini chart strip
