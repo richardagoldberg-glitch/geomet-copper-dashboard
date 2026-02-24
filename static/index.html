@@ -39,12 +39,15 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .ps{font-size:11px;color:var(--td);margin-top:2px}
 .lr{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--sf2);border-radius:4px;margin-top:8px}
 .ll{font-size:10px;color:var(--tm)}.lv{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
-.mc-strip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
-.mc{background:var(--sf2);border-radius:4px;padding:6px 8px}
-.mc-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+.mc-wide{background:var(--sf2);border-radius:4px;padding:6px 10px;margin-top:4px}
+.mc-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
 .mc-title{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:.5px;color:var(--td)}
 .mc-val{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700}
-.mc-chart{height:56px}.mc-chart svg{width:100%;height:100%}
+.mc-chart{height:48px}.mc-chart svg{width:100%;height:100%}
+.mc-months{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--td);padding:2px 0 0}
+.mc-ctx{display:flex;gap:6px;margin-top:4px}
+.mc-ctx-item{flex:1;padding:5px 8px;background:var(--sf2);border-radius:4px;display:flex;justify-content:space-between;align-items:center}
+.mc-ctx-l{font-size:9px;color:var(--tm)}.mc-ctx-v{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600}
 .mg{display:grid;gap:7px}
 .mr{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid transparent}
 .mr.a{border-left-color:var(--g)}.mr.bl{border-left-color:var(--r)}
@@ -183,51 +186,44 @@ else acLabel=cr.front_month.ticker+' ('+cr.front_month.label+')';}
 h+='<div class="pn pp"><div class="pl">COMEX Copper \u2014 '+acLabel+'</div><div class="pm"><div class="pv">'+m.price.toFixed(4)+'</div><div class="pu">$/lb</div>';
 h+='<div class="pc '+cc+'">'+cs+m.change.toFixed(4)+' ('+cs+m.change_pct.toFixed(2)+'%)</div></div>';
 h+='<div class="ps">Prev settle: '+m.prev_close.toFixed(4)+(m.copper_source?' <span style="font-size:8px;color:var(--td)">via '+m.copper_source+'</span>':'')+'</div>';
-// Contract info — highlight which contract is active with an arrow
-if(cr){var fm=cr.front_month,nm=cr.next_month;
-var fAct=ac==='front',nAct=ac==='next';
-h+='<div class="lr"><span class="ll">'+(fAct?'\u25B6 ':'')+'Front</span><span class="lv" style="color:var(--cu)'+(fAct?';font-weight:700':'')+'">'+fm.ticker+' ('+fm.label+')'+(fAct?' \u2190 shown':'')+'</span></div>';
-if(nm){h+='<div class="lr"><span class="ll">'+(nAct?'\u25B6 ':'')+'Next</span><span class="lv" style="color:var(--b)'+(nAct?';font-weight:700':'')+'">'+nm.ticker+' ('+nm.label+') '+(cr.next_price&&!nAct?'$'+cr.next_price.toFixed(4):nAct?'\u2190 shown':'\u2014')+'</span></div>';}
-if(cr.calendar_spread!==undefined&&cr.calendar_spread!==null){var ms=cr.market_structure;
+// Contango/backwardation — single clean line
+if(cr&&cr.calendar_spread!==undefined&&cr.calendar_spread!==null){var fm=cr.front_month,nm=cr.next_month;
+var ms=cr.market_structure;
 var sclr=ms==='contango'?'var(--y)':ms==='backwardation'?'var(--b)':'var(--tm)';
 var slbl=ms==='contango'?'CONTANGO':ms==='backwardation'?'BACKWARDATION':'FLAT';
-h+='<div class="lr"><span class="ll">Spread</span><span class="lv" style="color:'+sclr+'">'+(cr.calendar_spread>=0?'+':'')+cr.calendar_spread.toFixed(4)+' <span style="font-size:9px;font-weight:600;letter-spacing:1px">'+slbl+'</span></span></div>';}}
+var mRef=fm.label.split(' ')[0]+' \u2192 '+(nm?nm.label.split(' ')[0]:'');
+h+='<div class="lr"><span class="ll">'+mRef+'</span><span class="lv" style="color:'+sclr+'">'+(cr.calendar_spread>=0?'+':'')+cr.calendar_spread.toFixed(4)+' <span style="font-size:9px;font-weight:600;letter-spacing:1px">'+slbl+'</span></span></div>';}
 // LME section
 h+='<div style="border-top:1px solid var(--bd);margin:8px 0"></div>';
 if(m.lme_price_lb){
 h+='<div style="display:flex;align-items:baseline;gap:8px;padding:8px 10px;background:var(--sf2);border-radius:4px"><span style="font-size:10px;color:var(--tm)">LME 3M</span><span style="font-family:JetBrains Mono,monospace;font-size:22px;font-weight:700">$'+m.lme_price_lb.toFixed(4)+'</span><span style="font-size:10px;color:var(--td)">/lb</span>';
 if(m.lme_change!==null&&m.lme_change!==undefined){var lcc=m.lme_change>=0?'up':'dn',lcs=m.lme_change>=0?'+':'';h+='<span class="pc '+lcc+'" style="font-size:10px;padding:2px 5px">'+lcs+m.lme_change.toFixed(4)+' ('+lcs+m.lme_change_pct.toFixed(2)+'%)</span>';}
 h+='</div>';
-if(m.lme_price_mt)h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+n(Math.round(m.lme_price_mt))+'/MT</span></div>';
+if(m.lme_cash_lb&&m.lme_price_mt){var csmt=m.lme_cash_3m_spread_mt;
+h+='<div class="lr"><span class="ll">Cash \u2192 3M</span><span class="lv" style="color:var(--y)">+$'+csmt+'/MT CONTANGO <span style="font-size:9px;color:var(--td)">($'+n(Math.round(m.lme_price_mt))+'/MT)</span></span></div>';
+}else if(m.lme_price_mt){h+='<div class="lr"><span class="ll">LME 3M</span><span class="lv">$'+n(Math.round(m.lme_price_mt))+'/MT</span></div>';}
 if(m.comex_lme_spread!==null&&m.comex_lme_spread!==undefined){var spc=m.comex_lme_spread>=0?'var(--g)':'var(--b)';
 var absSp=Math.abs(m.comex_lme_spread),spTag='';
 if(absSp<0.05)spTag='<span class="arb-tag parity">PARITY</span>';
 else if(absSp>=0.15)spTag='<span class="arb-tag arb">ARB</span>';
-h+='<div class="lr"><span class="ll">COMEX-LME</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb'+spTag+'</span></div>';}
+h+='<div class="lr"><span class="ll">COMEX \u2194 LME</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb'+spTag+'</span></div>';}
 h+='<div style="text-align:right;font-size:8px;color:var(--td);margin-top:3px">via '+m.lme_source+'</div>';
 }else{h+='<div class="lr"><span class="ll">LME</span><span style="font-size:9px;color:var(--r)">Not configured</span></div>';}
-// Mini chart strip — COMEX+LME overlay, DXY, Warehouse
-h+='<div class="mc-strip">';
-h+='<div class="mc"><div class="mc-hdr"><span class="mc-title">COMEX + LME</span><span class="mc-val" id="mc-cu-v"></span></div><div class="mc-chart" id="mc-cu"></div></div>';
-h+='<div class="mc"><div class="mc-hdr"><span class="mc-title">DXY</span><span class="mc-val" id="mc-dx-v"></span></div><div class="mc-chart" id="mc-dx"></div></div>';
-h+='<div class="mc"><div class="mc-hdr"><span class="mc-title">WAREHOUSE</span><span class="mc-val" id="mc-wh-v"></span></div><div class="mc-chart" id="mc-wh"></div></div>';
-h+='</div>';
-// Fed
-if(m.fed){var fed=m.fed;
-if(fed.first_cut&&fed.first_cut!=='None priced'){h+='<div class="lr"><span class="ll">Fed Cuts</span><span class="lv">'+fed.total_cuts_2026+'x by Dec \u2014 first '+fed.first_cut+'</span></div>';}
-else if(fed.yield_10y){h+='<div class="lr"><span class="ll">10Y Yield</span><span class="lv">'+fed.yield_10y+'%</span></div>';}
-h+='<div class="lr"><span class="ll">Fed Rate</span><span class="lv">'+fed.current_rate+'%</span></div>';}
-// Warehouse
+// Charts — COMEX and LME full-width sparklines
+h+='<div class="mc-wide"><div class="mc-hdr"><span class="mc-title">COMEX 30D</span><span class="mc-val" id="mc-cx-v"></span></div><div class="mc-chart" id="mc-cx"></div><div class="mc-months" id="mc-cx-m"></div></div>';
+h+='<div class="mc-wide"><div class="mc-hdr"><span class="mc-title">LME 30D</span><span class="mc-val" id="mc-lm-v"></span></div><div class="mc-chart" id="mc-lm"></div><div class="mc-months" id="mc-lm-m"></div></div>';
+// Context row — DXY + Warehouse + Fed
+h+='<div class="mc-ctx">';
+if(m.dxy&&m.dxy.price){var dxc=m.dxy.change>=0?'var(--r)':'var(--g)';
+h+='<div class="mc-ctx-item"><span class="mc-ctx-l">DXY</span><span class="mc-ctx-v" style="color:'+dxc+'">'+m.dxy.price+' <span style="font-size:8px">'+(m.dxy.change>=0?'+':'')+m.dxy.change+'</span></span></div>';}
 if(m.warehouse&&m.warehouse.mt){var wh=m.warehouse;
-var wa=wh.trend==='building'?'\u2191 Building':wh.trend==='drawing'?'\u2193 Drawing':'\u2192 Stable';
+var wa=wh.trend==='building'?'\u2191':wh.trend==='drawing'?'\u2193':'\u2192';
 var wc=wh.trend==='building'?'var(--r)':wh.trend==='drawing'?'var(--g)':'var(--tm)';
-h+='<div class="lr"><span class="ll">COMEX</span><span class="lv" style="color:'+wc+'">'+n(wh.mt)+' MT '+wa+'</span></div>';
-if(wh.lme){var lw=wh.lme,la=lw.trend==='building'?'\u2191':lw.trend==='drawing'?'\u2193':'\u2192';
-var lc=lw.trend==='building'?'var(--r)':lw.trend==='drawing'?'var(--g)':'var(--tm)';
-h+='<div class="lr"><span class="ll">LME</span><span class="lv" style="color:'+lc+'">'+n(lw.mt)+' MT '+la+'</span></div>';}
-if(wh.global_mt){h+='<div class="lr" style="border-top:1px solid var(--bd);margin-top:2px;padding-top:4px"><span class="ll" style="font-weight:600">Global</span><span class="lv" style="font-weight:700">'+n(wh.global_mt)+' MT</span></div>';}
-var whDate=wh.date;if(wh.lme)whDate+=' / '+wh.lme.date;
-h+='<div style="text-align:right;font-size:8px;color:var(--td)">'+whDate+'</div>';}
+var whTot=wh.global_mt?n(wh.global_mt)+' MT':n(wh.mt)+' MT';
+h+='<div class="mc-ctx-item"><span class="mc-ctx-l">Warehouse</span><span class="mc-ctx-v" style="color:'+wc+'">'+whTot+' '+wa+'</span></div>';}
+if(m.fed){var fed=m.fed;
+h+='<div class="mc-ctx-item"><span class="mc-ctx-l">Fed</span><span class="mc-ctx-v">'+fed.current_rate+'%</span></div>';}
+h+='</div>';
 h+='</div>';
 // Morning Report
 h+='<div class="pn rp"><div class="pl">Morning Report</div>';
@@ -455,7 +451,7 @@ renderMiniCharts(m);
 }
 function mkSvg(el,data,color,data2,color2){
 if(!el||!data||!data.length)return;
-var w=el.clientWidth||80,ht=56;
+var w=el.clientWidth||80,ht=48;
 var all=data.slice();if(data2)all=all.concat(data2);
 var mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=mx-mn||1;
 function pts(p){return p.map(function(v,i){return(i/(p.length-1))*w+','+(ht-((v-mn)/rg)*(ht-4)-2)}).join(' ');}
@@ -470,42 +466,35 @@ if(data2&&data2.length){var p2=pts(data2);var cl2=color2||'#4a9eff';
 svg+='<polyline points="'+p2+'" fill="none" stroke="'+cl2+'" stroke-width="1" stroke-linejoin="round" stroke-dasharray="3,2"/>';}
 svg+='<circle cx="'+w+'" cy="'+ly+'" r="2" fill="'+cl+'"/></svg>';
 el.innerHTML=svg;}
+function monthLabels(data,elId){
+var ml=$((elId));if(!ml||!data||data.length<2)return;
+var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var seen={},labels=[];
+data.forEach(function(d,i){
+var dt=d.date||'';var m=parseInt(dt.substring(5,7),10)-1;
+var key=dt.substring(0,7);
+if(!seen[key]){seen[key]=1;labels.push({month:months[m],pos:i/(data.length-1)*100});}});
+var h='';labels.forEach(function(l){h+='<span style="position:absolute;left:'+l.pos+'%">'+l.month+'</span>';});
+ml.style.position='relative';ml.innerHTML=h;}
 function renderMiniCharts(m){
-// 1. COMEX + LME overlay
-var cuData=m.spark_1d||m.spark_7d||m.sparkline||[];
-var cuPts=cuData.map(function(d){return d.close});
-var lmeData=m.lme_spark||[];
-// For overlay, use COMEX sparkline (30d) with LME from spread history
-var cuOver=m.sparkline||[];var cuO=cuOver.map(function(d){return d.close});
-var lmeO=lmeData.map(function(d){return d.close});
-// Use whichever has data — prefer intraday, overlay only on daily
-var cuEl=$('mc-cu'),cuV=$('mc-cu-v');
-if(cuPts.length>0){
-var last=cuPts[cuPts.length-1],first=cuPts[0],chg=last-first,up=chg>=0;
-if(cuV)cuV.innerHTML='<span style="color:'+(up?'var(--g)':'var(--r)') +'">'+(up?'+':'')+chg.toFixed(3)+'</span>';
-if(lmeO.length>=2&&cuO.length>=2){mkSvg(cuEl,cuO,'#d4845a',lmeO,'#4a9eff');}
-else{mkSvg(cuEl,cuPts,null);}}
-// 2. DXY
-var dxData=(m.dxy&&m.dxy.sparkline)?m.dxy.sparkline:[];
-var dxPts=dxData.map(function(d){return d.close});
-var dxEl=$('mc-dx'),dxV=$('mc-dx-v');
-if(dxPts.length>0){
-var dxLast=dxPts[dxPts.length-1],dxFirst=dxPts[0],dxChg=dxLast-dxFirst,dxUp=dxChg>=0;
-// DXY up = bearish copper (red), DXY down = bullish (green)
-if(dxV)dxV.innerHTML='<span style="color:'+(dxUp?'var(--r)':'var(--g)')+'">'+(dxUp?'+':'')+dxChg.toFixed(2)+'</span>';
-mkSvg(dxEl,dxPts,dxUp?'#ff4757':'#00e59b');}
-// 3. Warehouse
-var whData=(m.warehouse&&m.warehouse.sparkline)?m.warehouse.sparkline:[];
-var whEl=$('mc-wh'),whV=$('mc-wh-v');
-if(whData.length>=2){
-var whPts=whData.map(function(d){return d.global_mt||d.comex_mt||0}).filter(function(v){return v>0});
-if(whPts.length>=2){
-var whLast=whPts[whPts.length-1],whFirst=whPts[0],whChg=whLast-whFirst;
-var whUp=whChg>=0;
-// Building = bearish (red), drawing = bullish (green)
-if(whV)whV.innerHTML='<span style="color:'+(whUp?'var(--r)':'var(--g)') +'">'+(whUp?'+':'')+n(whChg)+' MT</span>';
-mkSvg(whEl,whPts,whUp?'#ff4757':'#00e59b');}}
-else if(whV){whV.innerHTML='<span style="color:var(--td)">building</span>';}
+// 1. COMEX 30D
+var cxData=m.sparkline||[];
+var cxPts=cxData.map(function(d){return d.close});
+var cxEl=$('mc-cx'),cxV=$('mc-cx-v');
+if(cxPts.length>0){
+var last=cxPts[cxPts.length-1],first=cxPts[0],chg=last-first,up=chg>=0;
+if(cxV)cxV.innerHTML='<span style="color:'+(up?'var(--g)':'var(--r)') +'">'+(up?'+':'')+chg.toFixed(3)+'</span>';
+mkSvg(cxEl,cxPts,'#d4845a');
+monthLabels(cxData,'mc-cx-m');}
+// 2. LME 30D
+var lmData=m.lme_spark||[];
+var lmPts=lmData.map(function(d){return d.close});
+var lmEl=$('mc-lm'),lmV=$('mc-lm-v');
+if(lmPts.length>=2){
+var lmLast=lmPts[lmPts.length-1],lmFirst=lmPts[0],lmChg=lmLast-lmFirst,lmUp=lmChg>=0;
+if(lmV)lmV.innerHTML='<span style="color:'+(lmUp?'var(--g)':'var(--r)') +'">'+(lmUp?'+':'')+lmChg.toFixed(3)+'</span>';
+mkSvg(lmEl,lmPts,'#4a9eff');
+monthLabels(lmData,'mc-lm-m');}
 }
 fd();setInterval(fd,60000);setInterval(syncTheme,15000);
 </script>
