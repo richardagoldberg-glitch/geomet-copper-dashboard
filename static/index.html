@@ -15,7 +15,7 @@
 body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}
 .hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--bd);background:linear-gradient(180deg,rgba(212,132,90,.06) 0%,transparent 100%)}
 .hdr-l{display:flex;align-items:center;gap:12px}
-.logo{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:3px;color:var(--cu);padding:4px 8px;border:1.5px solid var(--cu);border-radius:3px}
+.logo{height:28px;display:flex;align-items:center}.logo img{height:100%;width:auto}
 .hdr-t{font-size:13px;font-weight:300;color:var(--tm)}
 .hdr-r{display:flex;align-items:center;gap:14px}
 .ri{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--td)}
@@ -39,16 +39,12 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .ps{font-size:11px;color:var(--td);margin-top:2px}
 .lr{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--sf2);border-radius:4px;margin-top:8px}
 .ll{font-size:10px;color:var(--tm)}.lv{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
-.sc{margin-top:10px}.sc svg{width:100%;height:100%}
-.sk-tabs{display:flex;gap:0;margin-bottom:4px}
-.sk-tab{font-size:9px;font-weight:600;padding:3px 10px;cursor:pointer;color:var(--td);background:var(--sf2);border:1px solid var(--bd);transition:all .15s}
-.sk-tab:first-child{border-radius:4px 0 0 4px}.sk-tab:last-child{border-radius:0 4px 4px 0}
-.sk-tab.active{color:var(--cu);background:var(--sf);border-color:var(--cu)}
-.sk-wrap{display:flex;align-items:center;gap:6px;height:50px}
-.sk-y{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--td);white-space:nowrap}
-.sk-chart{flex:1;height:50px}
-.sk-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
-.sk-range{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--td)}
+.mc-strip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
+.mc{background:var(--sf2);border-radius:4px;padding:6px 8px}
+.mc-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+.mc-title{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:.5px;color:var(--td)}
+.mc-val{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700}
+.mc-chart{height:32px}.mc-chart svg{width:100%;height:100%}
 .mg{display:grid;gap:7px}
 .mr{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--sf2);border-radius:4px;border-left:3px solid transparent}
 .mr.a{border-left-color:var(--g)}.mr.bl{border-left-color:var(--r)}
@@ -118,9 +114,6 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .sr-row.sup{border-left-color:var(--g)}.sr-row.res{border-left-color:var(--r)}
 .sr-level{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600}
 .sr-dist{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--td)}
-.dxy-box{padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;display:flex;justify-content:space-between;align-items:center}
-.dxy-label{font-size:10px;color:var(--tm)}.dxy-val{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
-.dxy-chg{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;padding:2px 5px;border-radius:3px}
 .fw-meter{padding:12px;background:var(--sf2);border-radius:6px;margin-bottom:12px}
 .fw-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .fw-label{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:1px}
@@ -156,7 +149,7 @@ body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--t
 </style>
 </head>
 <body>
-<div class="hdr"><div class="hdr-l"><div class="logo">GEOMET</div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
+<div class="hdr"><div class="hdr-l"><div class="logo"><img src="/logo.jpg" alt="Geomet"></div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
 <div class="hdr-r"><div id="lme" class="ch-badge closed"></div><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
 <div class="db" id="db"><div class="ld"><div class="ls"></div>Fetching copper data...</div></div>
 <script>
@@ -207,13 +200,12 @@ if(m.comex_lme_spread!==null&&m.comex_lme_spread!==undefined){var spc=m.comex_lm
 h+='<div class="lr"><span class="ll">COMEX-LME</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb</span></div>';}
 h+='<div style="text-align:right;font-size:8px;color:var(--td);margin-top:3px">via '+m.lme_source+'</div>';
 }else{h+='<div class="lr"><span class="ll">LME</span><span style="font-size:9px;color:var(--r)">Not configured</span></div>';}
-// Sparkline — near price data
-h+='<div class="sc"><div class="sk-hdr"><div class="sk-tabs"><span class="sk-tab active" data-sk="1d">Today</span><span class="sk-tab" data-sk="7d">7D</span><span class="sk-tab" data-sk="30d">30D</span></div><span class="sk-range" id="sk-rng"></span></div><div class="sk-wrap"><span class="sk-y" id="sk-lo"></span><div class="sk-chart" id="sk"></div><span class="sk-y" id="sk-hi"></span></div></div>';
-// Macro section
-h+='<div style="border-top:1px solid var(--bd);margin:8px 0"></div>';
-if(m.dxy&&m.dxy.price){var dx=m.dxy,dcl=dx.change>=0?'var(--r)':'var(--g)';
-h+='<div class="dxy-box"><span class="dxy-label">DXY</span><span class="dxy-val">'+dx.price.toFixed(2)+'</span>';
-h+='<span class="dxy-chg" style="color:'+dcl+';background:'+(dx.change>=0?'var(--rd)':'var(--gd)')+'">'+(dx.change>=0?'+':'')+dx.change.toFixed(2)+'</span></div>';}
+// Mini chart strip — COMEX+LME overlay, DXY, Warehouse
+h+='<div class="mc-strip">';
+h+='<div class="mc"><div class="mc-hdr"><span class="mc-title">COMEX + LME</span><span class="mc-val" id="mc-cu-v"></span></div><div class="mc-chart" id="mc-cu"></div></div>';
+h+='<div class="mc"><div class="mc-hdr"><span class="mc-title">DXY</span><span class="mc-val" id="mc-dx-v"></span></div><div class="mc-chart" id="mc-dx"></div></div>';
+h+='<div class="mc"><div class="mc-hdr"><span class="mc-title">WAREHOUSE</span><span class="mc-val" id="mc-wh-v"></span></div><div class="mc-chart" id="mc-wh"></div></div>';
+h+='</div>';
 // Fed
 if(m.fed){var fed=m.fed;
 if(fed.first_cut&&fed.first_cut!=='None priced'){h+='<div class="lr"><span class="ll">Fed Cuts</span><span class="lv">'+fed.total_cuts_2026+'x by Dec \u2014 first '+fed.first_cut+'</span></div>';}
@@ -452,40 +444,62 @@ if(d.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d.indexOf('\uD83D\uDD34')>=
 h+='<div class="'+cls+'">'+d+'</div>';});
 h+='</div></div>';
 $('db').innerHTML=h;
-// Store sparkline datasets globally for tab switching
-window._skData={d1:m.spark_1d||[],d7:m.spark_7d||[],d30:m.sparkline||[]};
-var skDef=window._skData.d1.length?'1d':(window._skData.d7.length?'7d':'30d');
-rsk(skDef);
-// Wire up tab clicks
-document.querySelectorAll('.sk-tab').forEach(function(tab){
-tab.addEventListener('click',function(){
-document.querySelectorAll('.sk-tab').forEach(function(t){t.classList.remove('active')});
-tab.classList.add('active');
-rsk(tab.getAttribute('data-sk'));
-});});
+// Render mini chart strip
+renderMiniCharts(m);
 }
-function rsk(tf){
-var sets=window._skData||{};
-var raw=tf==='1d'?sets.d1:tf==='7d'?sets.d7:sets.d30;
-if(!raw||!raw.length){var c=$('sk');if(c)c.innerHTML='<div style="color:var(--td);font-size:10px;padding:12px">No data for this timeframe</div>';return;}
-var c=$('sk');if(!c)return;var w=c.clientWidth||260,ht=50;
-var p=raw.map(function(d){return d.close});
-var mn=Math.min.apply(null,p),mx=Math.max.apply(null,p),rg=mx-mn||1;
-var first=p[0],last=p[p.length-1],up=last>=first,cl=up?'#00e59b':'#ff4757';
-var chg=last-first,chgPct=first?((chg/first)*100).toFixed(2):'0.00';
-// Labels
-var lbl=tf==='1d'?'Today':tf==='7d'?'7 Days':'30 Days';
-var rngEl=$('sk-rng');
-if(rngEl)rngEl.innerHTML=lbl+' \u2014 L <b>'+mn.toFixed(4)+'</b> H <b>'+mx.toFixed(4)+'</b> <span style="color:'+cl+'">'+(chg>=0?'+':'')+chg.toFixed(4)+' ('+chgPct+'%)</span>';
-var loEl=$('sk-lo');if(loEl){loEl.textContent=first.toFixed(2);loEl.style.fontSize='9px';}
-var hiEl=$('sk-hi');if(hiEl){hiEl.textContent=last.toFixed(2);hiEl.style.color=cl;hiEl.style.fontWeight='700';hiEl.style.fontSize='9px';}
-// Draw SVG
-var pts=p.map(function(v,i){return(i/(p.length-1))*w+','+(ht-((v-mn)/rg)*(ht-6)-3)}).join(' ');
-var fp='0,'+ht+' '+pts+' '+w+','+ht;
-var ly=ht-((last-mn)/rg)*(ht-6)-3;
-c.innerHTML='<svg viewBox="0 0 '+w+' '+ht+'" preserveAspectRatio="none"><defs><linearGradient id="sf" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+cl+'" stop-opacity=".15"/><stop offset="100%" stop-color="'+cl+'" stop-opacity="0"/></linearGradient></defs><polygon points="'+fp+'" fill="url(#sf)"/><polyline points="'+pts+'" fill="none" stroke="'+cl+'" stroke-width="1.5" stroke-linejoin="round"/><circle cx="'+w+'" cy="'+ly+'" r="2.5" fill="'+cl+'"/></svg>';
-// Highlight active tab
-document.querySelectorAll('.sk-tab').forEach(function(t){t.classList.toggle('active',t.getAttribute('data-sk')===tf);});
+function mkSvg(el,data,color,data2,color2){
+if(!el||!data||!data.length)return;
+var w=el.clientWidth||80,ht=32;
+var all=data.slice();if(data2)all=all.concat(data2);
+var mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=mx-mn||1;
+function pts(p){return p.map(function(v,i){return(i/(p.length-1))*w+','+(ht-((v-mn)/rg)*(ht-4)-2)}).join(' ');}
+var p1=pts(data);var last1=data[data.length-1];
+var ly=ht-((last1-mn)/rg)*(ht-4)-2;
+var up=last1>=data[0],cl=color||(up?'#00e59b':'#ff4757');
+var svg='<svg viewBox="0 0 '+w+' '+ht+'" preserveAspectRatio="none">';
+svg+='<defs><linearGradient id="gf'+el.id+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+cl+'" stop-opacity=".12"/><stop offset="100%" stop-color="'+cl+'" stop-opacity="0"/></linearGradient></defs>';
+svg+='<polygon points="0,'+ht+' '+p1+' '+w+','+ht+'" fill="url(#gf'+el.id+')"/>';
+svg+='<polyline points="'+p1+'" fill="none" stroke="'+cl+'" stroke-width="1.5" stroke-linejoin="round"/>';
+if(data2&&data2.length){var p2=pts(data2);var cl2=color2||'#4a9eff';
+svg+='<polyline points="'+p2+'" fill="none" stroke="'+cl2+'" stroke-width="1" stroke-linejoin="round" stroke-dasharray="3,2"/>';}
+svg+='<circle cx="'+w+'" cy="'+ly+'" r="2" fill="'+cl+'"/></svg>';
+el.innerHTML=svg;}
+function renderMiniCharts(m){
+// 1. COMEX + LME overlay
+var cuData=m.spark_1d||m.spark_7d||m.sparkline||[];
+var cuPts=cuData.map(function(d){return d.close});
+var lmeData=m.lme_spark||[];
+// For overlay, use COMEX sparkline (30d) with LME from spread history
+var cuOver=m.sparkline||[];var cuO=cuOver.map(function(d){return d.close});
+var lmeO=lmeData.map(function(d){return d.close});
+// Use whichever has data — prefer intraday, overlay only on daily
+var cuEl=$('mc-cu'),cuV=$('mc-cu-v');
+if(cuPts.length>0){
+var last=cuPts[cuPts.length-1],first=cuPts[0],chg=last-first,up=chg>=0;
+if(cuV)cuV.innerHTML='<span style="color:'+(up?'var(--g)':'var(--r)') +'">'+(up?'+':'')+chg.toFixed(3)+'</span>';
+if(lmeO.length>=2&&cuO.length>=2){mkSvg(cuEl,cuO,'#d4845a',lmeO,'#4a9eff');}
+else{mkSvg(cuEl,cuPts,null);}}
+// 2. DXY
+var dxData=(m.dxy&&m.dxy.sparkline)?m.dxy.sparkline:[];
+var dxPts=dxData.map(function(d){return d.close});
+var dxEl=$('mc-dx'),dxV=$('mc-dx-v');
+if(dxPts.length>0){
+var dxLast=dxPts[dxPts.length-1],dxFirst=dxPts[0],dxChg=dxLast-dxFirst,dxUp=dxChg>=0;
+// DXY up = bearish copper (red), DXY down = bullish (green)
+if(dxV)dxV.innerHTML='<span style="color:'+(dxUp?'var(--r)':'var(--g)')+'">'+(dxUp?'+':'')+dxChg.toFixed(2)+'</span>';
+mkSvg(dxEl,dxPts,dxUp?'#ff4757':'#00e59b');}
+// 3. Warehouse
+var whData=(m.warehouse&&m.warehouse.sparkline)?m.warehouse.sparkline:[];
+var whEl=$('mc-wh'),whV=$('mc-wh-v');
+if(whData.length>=2){
+var whPts=whData.map(function(d){return d.global_mt||d.comex_mt||0}).filter(function(v){return v>0});
+if(whPts.length>=2){
+var whLast=whPts[whPts.length-1],whFirst=whPts[0],whChg=whLast-whFirst;
+var whUp=whChg>=0;
+// Building = bearish (red), drawing = bullish (green)
+if(whV)whV.innerHTML='<span style="color:'+(whUp?'var(--r)':'var(--g)') +'">'+(whUp?'+':'')+n(whChg)+' MT</span>';
+mkSvg(whEl,whPts,whUp?'#ff4757':'#00e59b');}}
+else if(whV){whV.innerHTML='<span style="color:var(--td)">building</span>';}
 }
 fd();setInterval(fd,60000);setInterval(syncTheme,15000);
 </script>

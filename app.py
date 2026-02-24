@@ -287,7 +287,7 @@ def fetch_intraday_spark(ticker=None):
 # ---------------------------------------------------------------------------
 # DXY
 # ---------------------------------------------------------------------------
-_dxy_cache = {"price": None, "change": None, "change_pct": None, "timestamp": 0}
+_dxy_cache = {"price": None, "change": None, "change_pct": None, "sparkline": [], "timestamp": 0}
 
 def fetch_dxy():
     global _dxy_cache
@@ -297,14 +297,17 @@ def fetch_dxy():
     try:
         import yfinance as yf
         ticker = yf.Ticker("DX-Y.NYB")
-        hist = ticker.history(period="5d", interval="1d")
+        hist = ticker.history(period="1mo", interval="1d")
         if not hist.empty:
             hist = hist.reset_index()
             hist.columns = [c if isinstance(c, str) else c[0] for c in hist.columns]
             latest = hist.iloc[-1]; prev = hist.iloc[-2] if len(hist) > 1 else latest
             p = float(latest["Close"]); pc = float(prev["Close"]); ch = p - pc
+            spark = [{"date": r["Date"].strftime("%Y-%m-%d") if hasattr(r["Date"], "strftime") else str(r["Date"])[:10],
+                      "close": round(float(r["Close"]), 2)} for _, r in hist.iterrows()]
             _dxy_cache = {"price": round(p, 2), "change": round(ch, 2),
-                          "change_pct": round((ch / pc) * 100, 2) if pc else 0, "timestamp": now}
+                          "change_pct": round((ch / pc) * 100, 2) if pc else 0,
+                          "sparkline": spark, "timestamp": now}
     except Exception as e:
         print(f"[WARN] DXY fetch error: {e}")
     return _dxy_cache
@@ -821,7 +824,40 @@ def get_warehouse_data():
         result["date"] = comex["date"]
         result["trend"] = comex["trend"]
         result["source"] = comex["source"]
+    # Save daily warehouse history for sparkline
+    if comex or lme_wh:
+        _save_warehouse_history(comex, lme_wh)
+        result["sparkline"] = _load_warehouse_history()
     return result if (comex or lme_wh) else None
+
+
+WAREHOUSE_HISTORY = DATA_DIR / "warehouse_history.json"
+
+def _save_warehouse_history(comex, lme):
+    try:
+        history = []
+        if WAREHOUSE_HISTORY.exists():
+            with open(WAREHOUSE_HISTORY) as f: history = json.load(f)
+        today = datetime.now().strftime("%Y-%m-%d")
+        entry = {"date": today}
+        if comex: entry["comex_mt"] = comex["mt"]
+        if lme: entry["lme_mt"] = lme["mt"]
+        if comex and lme: entry["global_mt"] = comex["mt"] + lme["mt"]
+        if history and history[-1].get("date") == today:
+            history[-1] = entry
+        else:
+            history.append(entry)
+        history = history[-90:]
+        with open(WAREHOUSE_HISTORY, "w") as f: json.dump(history, f)
+    except Exception as e:
+        print(f"[WARN] warehouse history save: {e}")
+
+def _load_warehouse_history():
+    try:
+        if WAREHOUSE_HISTORY.exists():
+            with open(WAREHOUSE_HISTORY) as f: return json.load(f)
+    except: pass
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -1413,12 +1449,20 @@ def fetch_copper_data():
         fed = fetch_fed_data()
         warehouse = get_warehouse_data()
 
+        # LME sparkline from spread history
+        lme_spark = []
+        try:
+            sh = load_spread_history()
+            lme_spark = [{"date": e["date"], "close": e["lme"]} for e in sh if e.get("lme")]
+        except: pass
+
         result = {
             "price": round(price, 4), "prev_close": round(prev_close, 4),
             "change": round(change, 4), "change_pct": round(change_pct, 2),
             "ma50": round(ma50, 4), "ma100": round(ma100, 4), "ma200": round(ma200, 4),
             "vol_ratio": round(vol_ratio, 2), "recent_closes": [round(c, 4) for c in recent],
-            "sparkline": spark_30d, "spark_7d": spark_7d, "spark_1d": spark_1d, "copper_source": copper_source,
+            "sparkline": spark_30d, "spark_7d": spark_7d, "spark_1d": spark_1d,
+            "lme_spark": lme_spark, "copper_source": copper_source,
             "lme_price_lb": lme_price, "lme_price_mt": lme_mt, "lme_source": lme_source,
             "lme_change": lme_change, "lme_change_pct": lme_change_pct,
             "comex_lme_spread": spread, "comex_lme_spread_pct": spread_pct, "spread_intel": spread_intel,
@@ -1922,7 +1966,10 @@ class Handler(SimpleHTTPRequestHandler):
         fp = STATIC_DIR / self.path.lstrip("/")
         if fp.exists() and fp.is_file():
             self.send_response(200)
-            ct = "text/html" if str(fp).endswith(".html") else "text/css" if str(fp).endswith(".css") else "application/javascript"
+            ext = fp.suffix.lower()
+            ct = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
+                  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                  ".svg": "image/svg+xml", ".ico": "image/x-icon"}.get(ext, "application/octet-stream")
             self.send_header("Content-Type", ct); self.end_headers()
             self.wfile.write(fp.read_bytes())
         else: self.send_error(404)
