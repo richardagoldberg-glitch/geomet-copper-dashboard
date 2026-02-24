@@ -418,34 +418,33 @@ h+='<div class="rbg"><div class="rbf" style="width:'+supW+'%;background:var(--b)
 h+='<div style="display:flex;justify-content:space-between;font-size:10px;margin:6px 0 3px"><span style="color:var(--tm)">Total Sales</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+n(Math.round(dem))+' lbs</span></div>';
 h+='<div class="rbg"><div class="rbf" style="width:'+demW+'%;background:var(--p)"></div></div>';
 h+='</div>';
-h+='<div class="rs"><span class="rsl">Coverage</span><span class="rsv">'+r.coverage_pct.toFixed(1)+'%</span></div>';
 h+='<div class="rs"><span class="rsl">'+sdLbl+'</span><span class="rsv '+sdCls+'">'+n(Math.abs(Math.round(sd)))+' lbs</span></div>';
 var ic=r.inv_by_commodity||{},sc=r.sales_by_commodity||{},mf=cfg.monthly_flow||{};
+var tl=cfg.truckload_lbs||42000;
 var cats=['BB','#1','#2','Chops'];
 h+='<div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">';
-h+='<div style="display:flex;font-size:9px;color:var(--tm);margin-bottom:4px;padding:0 2px"><span style="flex:1">Grade</span><span style="width:65px;text-align:right">Inv</span><span style="width:65px;text-align:right">Sales</span><span style="width:55px;text-align:right">Mo Sal</span></div>';
+h+='<div style="display:flex;font-size:9px;color:var(--tm);margin-bottom:4px;padding:0 2px"><span style="flex:1">Grade</span><span style="width:55px;text-align:right">Inv</span><span style="width:55px;text-align:right">Sales</span><span style="width:50px;text-align:right">Flow</span><span style="width:14px"></span></div>';
 for(var ci=0;ci<cats.length;ci++){var cat=cats[ci];
 var inv=ic[cat]||0,sal=sc[cat]||0,flow=mf[cat]||0;
-var moSales=flow>0?(sal/flow):0;
-var moClr=moSales<1?'var(--r)':moSales<2?'var(--y)':'var(--g)';
-h+='<div style="display:flex;font-size:10px;padding:3px 2px;align-items:center;border-bottom:1px solid var(--bd)">';
+var flowLoads=flow>0?Math.round(flow/tl):0;
+var moFwd=flow>0?(sal/flow):99;
+var warn=moFwd<1?'var(--r)':moFwd<2?'var(--y)':'';
+var warnIcon=moFwd<1?'\u26A0':moFwd<2?'\u25CF':'';
+var warnClr=moFwd<1?'var(--r)':moFwd<2?'var(--y)':'';
+h+='<div style="display:flex;font-size:10px;padding:3px 2px;align-items:center;border-bottom:1px solid var(--bd)'+(warn?';background:rgba('+(moFwd<1?'255,71,87':'255,192,72')+',.06)':'')+'">';
 h+='<span style="flex:1;font-weight:600">'+cat+'</span>';
-h+='<span style="width:65px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(inv))+'</span>';
-h+='<span style="width:65px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(sal))+'</span>';
-h+='<span style="width:55px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;color:'+moClr+'">'+moSales.toFixed(1)+'</span>';
+h+='<span style="width:55px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(inv))+'</span>';
+h+='<span style="width:55px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px">'+n(Math.round(sal))+'</span>';
+h+='<span style="width:50px;text-align:right;font-family:JetBrains Mono,monospace;font-size:10px;color:var(--td)">'+flowLoads+'/mo</span>';
+h+='<span style="width:14px;text-align:center;font-size:9px;color:'+warnClr+'">'+warnIcon+'</span>';
 h+='</div>';
 if(cat==='Chops'&&r.icw_cu_lbs>0){
 h+='<div style="display:flex;font-size:9px;padding:2px 2px 2px 12px;color:var(--tm);border-bottom:1px solid var(--bd)">';
-h+='<span style="flex:1">Chopped</span><span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.chops_solid_lbs))+'</span><span style="width:135px"></span></div>';
-h+='<div style="display:flex;font-size:9px;padding:2px 2px 2px 12px;color:var(--tm);border-bottom:1px solid var(--bd)">';
-h+='<span style="flex:1">Still insulated</span><span style="width:75px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.icw_cu_lbs))+'</span><span style="width:135px"></span></div>';
+h+='<span style="flex:1">Still to chop</span><span style="width:55px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.icw_cu_lbs))+'</span><span style="width:120px"></span></div>';
 }}
 if(r.po_lbs>0){h+='<div style="display:flex;font-size:9px;padding:4px 2px;color:var(--tm);border-bottom:1px solid var(--bd)">';
-h+='<span style="flex:1">+ POs not yet received</span><span style="width:65px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.po_lbs))+'</span><span style="width:120px"></span></div>';}
+h+='<span style="flex:1">+ POs not yet received</span><span style="width:55px;text-align:right;font-family:JetBrains Mono,monospace">'+n(Math.round(r.po_lbs))+'</span><span style="width:120px"></span></div>';}
 h+='</div>';
-var thinGrades=[];
-for(var ti=0;ti<cats.length;ti++){var tc=cats[ti],tf=mf[tc]||0,ts=sc[tc]||0;if(tf>0&&ts/tf<2)thinGrades.push(tc+' '+(ts/tf).toFixed(1)+'mo');}
-if(thinGrades.length>0){h+='<div style="margin-top:6px;padding:6px 8px;background:rgba(255,192,72,.08);border:1px dashed rgba(255,192,72,.3);border-radius:4px;font-size:10px;color:var(--y)">Pipeline thin: '+thinGrades.join(', ')+' \u2014 time to sell</div>';}
 }else h+='<div class="nd">No supply data</div>';
 h+='</div>';
 // Margin & Risk — consolidated panel
