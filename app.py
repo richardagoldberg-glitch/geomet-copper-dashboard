@@ -440,6 +440,100 @@ def fetch_fed_data():
 
 
 # ---------------------------------------------------------------------------
+# COT — CFTC Commitment of Traders (4h cache)
+# ---------------------------------------------------------------------------
+_cot_cache = {"data": None, "timestamp": 0}
+
+def fetch_cot_data():
+    """Fetch CFTC Commitment of Traders data for COMEX copper. 4h cache.
+    Uses disaggregated futures-only report via Socrata API (free, no auth).
+    """
+    global _cot_cache
+    now = time.time()
+    if _cot_cache["data"] and (now - _cot_cache["timestamp"]) < 14400:
+        return _cot_cache["data"]
+    try:
+        import urllib.request, urllib.parse
+        base = "https://publicreporting.cftc.gov/resource/72hh-3qpy.json"
+        params = urllib.parse.urlencode({
+            "$where": "commodity_name like '%COPPER%' AND open_interest_all > 100000",
+            "$order": "report_date_as_yyyy_mm_dd DESC",
+            "$limit": "52",
+        })
+        url = f"{base}?{params}"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "GeometDashboard/1.0",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            rows = json.loads(resp.read().decode())
+        if not rows:
+            print("[WARN] COT: no data returned")
+            return None
+
+        latest = rows[0]
+        prior = rows[1] if len(rows) > 1 else None
+
+        mm_long = int(latest.get("m_money_positions_long_all", 0))
+        mm_short = int(latest.get("m_money_positions_short_all", 0))
+        mm_net = mm_long - mm_short
+
+        mm_weekly_change = 0
+        if prior:
+            prior_net = (int(prior.get("m_money_positions_long_all", 0))
+                         - int(prior.get("m_money_positions_short_all", 0)))
+            mm_weekly_change = mm_net - prior_net
+
+        nets = []
+        for r in rows:
+            net = (int(r.get("m_money_positions_long_all", 0))
+                   - int(r.get("m_money_positions_short_all", 0)))
+            nets.append(net)
+        mm_52w_low = min(nets)
+        mm_52w_high = max(nets)
+        rng = mm_52w_high - mm_52w_low
+        mm_pct_52w = round((mm_net - mm_52w_low) / rng * 100, 1) if rng > 0 else 50
+
+        if mm_pct_52w >= 90: crowding = "EXTREMELY_LONG"
+        elif mm_pct_52w >= 70: crowding = "LONG"
+        elif mm_pct_52w <= 10: crowding = "EXTREMELY_SHORT"
+        elif mm_pct_52w <= 30: crowding = "SHORT"
+        else: crowding = "NEUTRAL"
+
+        prod_long = int(latest.get("prod_merc_positions_long_all",
+                       latest.get("prod_merc_positions_long", 0)))
+        prod_short = int(latest.get("prod_merc_positions_short_all",
+                        latest.get("prod_merc_positions_short", 0)))
+        prod_net = prod_long - prod_short
+
+        swap_long = int(latest.get("swap_positions_long_all",
+                        latest.get("swap__positions_long_all", 0)))
+        swap_short = int(latest.get("swap__positions_short_all",
+                         latest.get("swap_positions_short_all", 0)))
+        swap_net = swap_long - swap_short
+
+        traders_long = int(latest.get("traders_m_money_long_all", 0))
+        traders_short = int(latest.get("traders_m_money_short_all", 0))
+        report_date = latest.get("report_date_as_yyyy_mm_dd", "")[:10]
+
+        result = {
+            "mm_net": mm_net, "mm_long": mm_long, "mm_short": mm_short,
+            "mm_weekly_change": mm_weekly_change,
+            "mm_pct_52w": mm_pct_52w, "mm_52w_low": mm_52w_low, "mm_52w_high": mm_52w_high,
+            "crowding": crowding,
+            "prod_net": prod_net, "swap_net": swap_net,
+            "report_date": report_date,
+            "traders_long": traders_long, "traders_short": traders_short,
+        }
+        _cot_cache = {"data": result, "timestamp": now}
+        print(f"[INFO] COT: MM net {mm_net:+,} ({crowding}, {mm_pct_52w}th pctl) as of {report_date}")
+        return result
+    except Exception as e:
+        print(f"[WARN] COT fetch error: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # CHINA / SHFE STATUS
 # ---------------------------------------------------------------------------
 def get_china_status():
@@ -1501,6 +1595,8 @@ def fetch_copper_data():
             vol = volumes[-1]
             vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
         else:
+            vol = None
+            avg_vol = None
             vol_ratio = 1.0
 
         recent = closes[-5:] if n_closes >= 5 else closes
@@ -1574,7 +1670,9 @@ def fetch_copper_data():
             "price": round(price, 4), "prev_close": round(prev_close, 4),
             "change": round(change, 4), "change_pct": round(change_pct, 2),
             "ma50": round(ma50, 4), "ma100": round(ma100, 4), "ma200": round(ma200, 4),
-            "vol_ratio": round(vol_ratio, 2), "recent_closes": [round(c, 4) for c in recent],
+            "vol_ratio": round(vol_ratio, 2),
+            "volume": int(vol) if vol else None, "avg_volume": int(avg_vol) if avg_vol else None,
+            "recent_closes": [round(c, 4) for c in recent],
             "sparkline": spark_30d, "spark_7d": spark_7d, "spark_1d": spark_1d,
             "lme_spark": lme_spark, "copper_source": copper_source,
             "lme_price_lb": lme_price, "lme_price_mt": lme_mt, "lme_source": lme_source,
@@ -1804,7 +1902,7 @@ def calc_margin_projection(pos, md, risk):
     }
 
 
-def gen_decisions(sig, risk, md, fix_window, roll=None):
+def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
     dec = []
     if not sig: return ["Unable to fetch market data"]
     p = md["price"] if md else 0; ft = CFG["FIX_TARGET"]
@@ -1874,6 +1972,19 @@ def gen_decisions(sig, risk, md, fix_window, roll=None):
         if wh.get("global_mt"):
             msg += f" \u2014 Global: {wh['global_mt']:,} MT"
         dec.append(msg)
+
+    # COT positioning
+    if cot:
+        pct = cot.get("mm_pct_52w", 50)
+        chg = cot.get("mm_weekly_change", 0)
+        if pct >= 90:
+            dec.append(f"COT: Managed Money EXTREMELY LONG ({pct:.0f}th pctl) \u2014 crowded trade, selloff risk")
+        elif pct <= 10:
+            dec.append(f"COT: Managed Money EXTREMELY SHORT ({pct:.0f}th pctl) \u2014 squeeze potential, buying opportunity")
+        elif pct >= 70 and chg < -5000:
+            dec.append(f"COT: MM long but unwinding ({chg:+,} wk) \u2014 momentum selling watch")
+        elif pct <= 30 and chg > 5000:
+            dec.append(f"COT: MM short but covering ({chg:+,} wk) \u2014 rally pressure")
 
     # Contract roll alert
     if roll and roll.get("roll_urgency") in ("critical", "warning"):
@@ -2068,7 +2179,8 @@ class Handler(SimpleHTTPRequestHandler):
                     spread = round(md["price"] - roll["front_price"], 4)
                     roll["calendar_spread"] = spread
                     roll["market_structure"] = "contango" if spread > 0.001 else "backwardation" if spread < -0.001 else "flat"
-            dec = gen_decisions(sig, risk, md, fix_window, roll)
+            cot = fetch_cot_data()
+            dec = gen_decisions(sig, risk, md, fix_window, roll, cot=cot)
             gtc = gen_gtc(pos, md)
             margin = calc_margin_projection(pos, md, risk)
             fixable = calc_fixable_orders(pos, md)
@@ -2076,7 +2188,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
                 "fixable_orders": fixable,
-                "margin_projection": margin, "contract_roll": roll,
+                "margin_projection": margin, "contract_roll": roll, "cot": cot,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }

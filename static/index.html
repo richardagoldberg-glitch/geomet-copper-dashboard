@@ -341,6 +341,33 @@ h+='</div>';}
 if(m.streak&&m.streak>=2){h+='<div class="streak-badge '+(m.streak_dir||'up')+'">'+(m.streak_dir==='up'?'\u25B2':'\u25BC')+' '+m.streak+' day streak</div>';}
 if(m.avg_daily_range){h+='<div class="ctx-row" style="margin-top:6px"><span class="ctx-l">Avg Daily Range (10d)</span><span class="ctx-v">'+m.avg_daily_range.toFixed(2)+'c</span></div>';
 if(m.vol_vs_avg)h+='<div class="ctx-row"><span class="ctx-l">Today vs Avg Range</span><span class="ctx-v" style="color:'+(m.vol_vs_avg>1.5?'var(--y)':'var(--tx)')+'">'+m.vol_vs_avg.toFixed(1)+'x</span></div>';}
+if(m.volume!==null&&m.volume!==undefined){var vBadge='';
+if(m.vol_ratio>2)vBadge='<span style="font-family:JetBrains Mono,monospace;font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--yd);color:var(--y);margin-left:6px">HIGH VOL</span>';
+else if(m.vol_ratio<0.5)vBadge='<span style="font-family:JetBrains Mono,monospace;font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--od);color:var(--o);margin-left:6px">THIN</span>';
+h+='<div class="ctx-row" style="margin-top:6px"><span class="ctx-l">Volume'+vBadge+'</span><span class="ctx-v">'+n(m.volume)+' contracts</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">20d Avg Volume</span><span class="ctx-v">'+n(m.avg_volume)+'</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">Vol Ratio</span><span class="ctx-v" style="color:'+(m.vol_ratio>2?'var(--y)':m.vol_ratio<0.5?'var(--o)':'var(--tx)')+'">'+m.vol_ratio.toFixed(1)+'x</span></div>';}
+h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
+var cot=d.cot;
+if(cot){h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">COT \u2014 Managed Money</div>';
+var mmClr=cot.mm_net>=0?'var(--g)':'var(--r)';
+h+='<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px"><span style="font-family:JetBrains Mono,monospace;font-size:22px;font-weight:700;color:'+mmClr+'">'+(cot.mm_net>=0?'+':'')+n(cot.mm_net)+'</span><span style="font-size:10px;color:var(--td)">net contracts</span></div>';
+var wcClr=cot.mm_weekly_change>=0?'var(--g)':'var(--r)';
+h+='<div class="ctx-row"><span class="ctx-l">Weekly Change</span><span class="ctx-v" style="color:'+wcClr+'">'+(cot.mm_weekly_change>=0?'+':'')+n(cot.mm_weekly_change)+'</span></div>';
+var cpClr=cot.mm_pct_52w>70?'var(--g)':cot.mm_pct_52w<30?'var(--r)':'var(--tx)';
+h+='<div class="ctx-row"><span class="ctx-l">52-Week Percentile</span><span class="ctx-v" style="color:'+cpClr+'">'+cot.mm_pct_52w.toFixed(0)+'th</span></div>';
+var cRng=cot.mm_52w_high-cot.mm_52w_low;var cPos=cRng>0?((cot.mm_net-cot.mm_52w_low)/cRng*100):50;
+h+='<div class="rng-bar"><div class="rng-fill" style="width:100%"></div><div class="rng-dot" style="left:'+cPos+'%"></div></div>';
+h+='<div class="rng-labels"><span>'+n(cot.mm_52w_low)+'</span><span>'+n(cot.mm_52w_high)+'</span></div>';
+var crwd=cot.crowding,crwdClr='var(--tm)',crwdBg='var(--sf)';
+if(crwd==='EXTREMELY_LONG'){crwdClr='var(--o)';crwdBg='var(--od)'}
+else if(crwd==='LONG'){crwdClr='var(--g)';crwdBg='var(--gd)'}
+else if(crwd==='EXTREMELY_SHORT'){crwdClr='var(--o)';crwdBg='var(--od)'}
+else if(crwd==='SHORT'){crwdClr='var(--r)';crwdBg='var(--rd)'}
+h+='<div style="margin:6px 0"><span style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;background:'+crwdBg+';color:'+crwdClr+';letter-spacing:1px">'+crwd.replace(/_/g,' ')+'</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">Producers/Merchants</span><span class="ctx-v" style="color:'+(cot.prod_net>=0?'var(--g)':'var(--r)')+'">'+(cot.prod_net>=0?'+':'')+n(cot.prod_net)+'</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">Swap Dealers</span><span class="ctx-v" style="color:'+(cot.swap_net>=0?'var(--g)':'var(--r)')+'">'+(cot.swap_net>=0?'+':'')+n(cot.swap_net)+'</span></div>';
+h+='<div style="font-size:8px;color:var(--td);margin-top:4px;text-align:right">CFTC as of '+cot.report_date+'</div>';}
 h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 if(d.contract_roll){var crl=d.contract_roll,fml=crl.front_month,nml=crl.next_month;
 var rlc=crl.roll_color==='red'?'var(--r)':crl.roll_color==='orange'?'var(--o)':crl.roll_color==='yellow'?'var(--y)':'var(--g)';
@@ -472,6 +499,7 @@ if(/FIX WINDOW|LIQUIDATION|FLASH|DIP|BIG.DROP|momentum/i.test(t))return 'pn-sp';
 if(/SHFE|DXY|dollar|Fed:|warehouse|COMEX.*LME|parity|arb/i.test(t))return 'pn-pp';
 if(/shipped.*UNPRICED|UNPRICED.*shipped/i.test(t))return 'pn-slp';
 if(/TARGET|approaching|GTC/i.test(t))return 'pn-sp';
+if(/COT:|Managed Money|crowded|squeeze/i.test(t))return 'pn-tp';
 if(/Support|Resistance/i.test(t))return 'pn-tp';
 if(/migrating|roll/i.test(t))return 'pn-tp';
 if(/Long.*unpriced|unpriced.*long/i.test(t))return 'pn-posp';
