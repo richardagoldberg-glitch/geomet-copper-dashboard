@@ -20,7 +20,7 @@ GTC_LEVELS = [6.00, 6.05, 6.10, 6.15]
 TRUCKLOAD_LBS = 42000
 
 # Baseline position — your target long exposure in lbs (positive = long)
-BASELINE_LBS = 200000
+BASELINE_LBS = 300000
 
 # Attention thresholds ($/lb daily move)
 ATTENTION_MOVE = 0.10   # 10c gets your attention
