@@ -2022,6 +2022,17 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
         elif pct <= 30 and chg > 5000:
             dec.append(f"COT: MM short but covering ({chg:+,} wk) \u2014 rally pressure")
 
+    # Month-end rebalancing pressure
+    today = datetime.now()
+    dom = today.day
+    dow = today.weekday()  # 0=Mon, 4=Fri
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    trading_days_left = sum(1 for d in range(dom + 1, last_day + 1)
+                           if datetime(today.year, today.month, d).weekday() < 5)
+    pct_30d = md.get("pct_30d", 50) if md else 50
+    if trading_days_left <= 3 and pct_30d >= 75:
+        dec.append(f"Month-end in {trading_days_left} trading day{'s' if trading_days_left != 1 else ''} \u2014 rebalancing selling pressure likely at {pct_30d:.0f}th pctl")
+
     # Contract roll alert
     if roll and roll.get("roll_urgency") in ("critical", "warning"):
         nm_ticker = roll.get("next_month", {}).get("ticker", "next contract")
