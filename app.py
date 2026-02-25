@@ -1546,16 +1546,15 @@ def fetch_copper_data():
         spread = round(price - lme_price, 4) if lme_price else None
         spread_pct = round((spread / lme_price) * 100, 2) if lme_price and spread else None
         spread_intel = None
-        lme_change = None; lme_change_pct = None
+        lme_change = None; lme_change_pct = None; lme_prev_lb = None
         if spread is not None and lme_price:
             history = save_spread_entry(round(price, 4), round(lme_price, 4), round(spread, 4))
             spread_intel = compute_spread_intelligence(history, spread)
-            # LME daily change — use COMEX prev settle as proxy for LME prev settle
-            # COMEX and LME settle near parity, so this gives an accurate session change
-            # (until we add a real LME settlement feed like westmetall)
-            if prev_close:
-                lme_change = round(lme_price - prev_close, 4)
-                lme_change_pct = round((lme_change / prev_close) * 100, 2)
+            # LME daily change — use previous day's LME price from spread history
+            if len(history) >= 2:
+                lme_prev_lb = history[-2]["lme"]
+                lme_change = round(lme_price - lme_prev_lb, 4)
+                lme_change_pct = round((lme_change / lme_prev_lb) * 100, 2)
 
         dxy = fetch_dxy()
         china = get_china_status()
@@ -1943,6 +1942,7 @@ def load_position():
 _USERS = {
     "richard": hashlib.sha256(b"geomet").hexdigest(),
     "jorge": hashlib.sha256(b"geomet").hexdigest(),
+    "mikel": hashlib.sha256(b"geomet").hexdigest(),
 }
 _sessions = {}  # token -> {"user": ..., "created": timestamp}
 SESSION_MAX_AGE = 86400 * 7  # 7 days
