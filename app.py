@@ -2032,6 +2032,8 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
     pct_30d = md.get("pct_30d", 50) if md else 50
     if trading_days_left <= 3 and pct_30d >= 75:
         dec.append(f"Month-end in {trading_days_left} trading day{'s' if trading_days_left != 1 else ''} \u2014 rebalancing selling pressure likely at {pct_30d:.0f}th pctl")
+    if dow == 4 and pct_30d >= 75:
+        dec.append(f"Friday \u2014 week-end profit-taking likely after rally ({pct_30d:.0f}th pctl)")
 
     # Contract roll alert
     if roll and roll.get("roll_urgency") in ("critical", "warning"):
