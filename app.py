@@ -2035,6 +2035,14 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
     if dow == 4 and pct_30d >= 75:
         dec.append(f"Friday \u2014 week-end profit-taking likely after rally ({pct_30d:.0f}th pctl)")
 
+    # Extended streak — mean reversion risk
+    streak = md.get("streak", 0) if md else 0
+    streak_dir = md.get("streak_dir") if md else None
+    if streak >= 4 and streak_dir == "up":
+        dec.append(f"{streak}-day up streak \u2014 extended rally, pullback risk rising")
+    elif streak >= 4 and streak_dir == "down":
+        dec.append(f"{streak}-day down streak \u2014 oversold, bounce likely")
+
     # Contract roll alert
     if roll and roll.get("roll_urgency") in ("critical", "warning"):
         nm_ticker = roll.get("next_month", {}).get("ticker", "next contract")
