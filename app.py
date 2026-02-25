@@ -515,14 +515,36 @@ def fetch_cot_data():
         traders_long = int(latest.get("traders_m_money_long_all", 0))
         traders_short = int(latest.get("traders_m_money_short_all", 0))
         report_date = latest.get("report_date_as_yyyy_mm_dd", "")[:10]
+        oi_at_report = int(latest.get("open_interest_all", 0))
+
+        # One-liner insight — only when positioning is notable
+        insight = None
+        if mm_pct_52w >= 85:
+            insight = "Crowded long \u2014 selloffs will be sharp on bad news"
+        elif mm_pct_52w >= 70:
+            if mm_weekly_change < -3000:
+                insight = "Funds long but trimming \u2014 momentum fading"
+            else:
+                insight = "Funds well long \u2014 price supported but less fuel to rally"
+        elif mm_pct_52w <= 15:
+            insight = "Funds heavily short \u2014 squeeze risk if sentiment turns"
+        elif mm_pct_52w <= 30:
+            if mm_weekly_change > 3000:
+                insight = "Funds light but adding \u2014 early buying pressure"
+            else:
+                insight = "Funds light \u2014 buying fuel available on any catalyst"
+        elif mm_pct_52w > 55 and mm_weekly_change < -5000:
+            insight = "Funds unwinding longs \u2014 selling pressure"
+        elif mm_pct_52w < 45 and mm_weekly_change > 5000:
+            insight = "Funds covering shorts \u2014 buying pressure building"
 
         result = {
             "mm_net": mm_net, "mm_long": mm_long, "mm_short": mm_short,
             "mm_weekly_change": mm_weekly_change,
             "mm_pct_52w": mm_pct_52w, "mm_52w_low": mm_52w_low, "mm_52w_high": mm_52w_high,
-            "crowding": crowding,
+            "crowding": crowding, "insight": insight,
             "prod_net": prod_net, "swap_net": swap_net,
-            "report_date": report_date,
+            "report_date": report_date, "oi_at_report": oi_at_report,
             "traders_long": traders_long, "traders_short": traders_short,
         }
         _cot_cache = {"data": result, "timestamp": now}
@@ -1236,6 +1258,20 @@ def _compute_oi_trend(history, current_oi):
     change_pct = round((change / first_oi) * 100, 1)
     trend = "building" if change > 0 else "declining" if change < 0 else "stable"
     return {"trend": trend, "change_5d": change, "change_5d_pct": change_pct, "history_days": len(history)}
+
+
+def _get_oi_on_date(target_date):
+    """Get OI on or before target_date (YYYY-MM-DD string) from history."""
+    try:
+        if OI_HISTORY.exists():
+            with open(OI_HISTORY) as f:
+                history = json.load(f)
+            for entry in reversed(history):
+                if entry["date"] <= target_date:
+                    return entry["oi"]
+    except:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -2180,6 +2216,35 @@ class Handler(SimpleHTTPRequestHandler):
                     roll["calendar_spread"] = spread
                     roll["market_structure"] = "contango" if spread > 0.001 else "backwardation" if spread < -0.001 else "flat"
             cot = fetch_cot_data()
+            # Price + OI change since last COT report date
+            cot_context = None
+            if cot and md and md.get("sparkline"):
+                cot_date = cot["report_date"]
+                price_at_cot = None
+                for pt in md["sparkline"]:
+                    if pt["date"] <= cot_date:
+                        price_at_cot = pt["close"]
+                if price_at_cot:
+                    price_delta = round(md["price"] - price_at_cot, 4)
+                    cot_context = {"price_delta": price_delta}
+                    # OI comparison only when we have front-month history covering that date
+                    if roll and roll.get("open_interest"):
+                        oi_at_cot = _get_oi_on_date(cot_date)
+                        current_oi = roll["open_interest"]["total"]
+                        if oi_at_cot:
+                            oi_delta = current_oi - oi_at_cot
+                            cot_context["oi_at_cot"] = oi_at_cot
+                            cot_context["oi_now"] = current_oi
+                            cot_context["oi_delta"] = oi_delta
+                            # Price-OI interpretation
+                            if oi_delta > 500 and price_delta > 0.01:
+                                cot_context["interp"] = "OI up + price up \u2192 new longs being added"
+                            elif oi_delta > 500 and price_delta < -0.01:
+                                cot_context["interp"] = "OI up + price down \u2192 new shorts being added"
+                            elif oi_delta < -500 and price_delta > 0.01:
+                                cot_context["interp"] = "OI down + price up \u2192 shorts covering"
+                            elif oi_delta < -500 and price_delta < -0.01:
+                                cot_context["interp"] = "OI down + price down \u2192 longs liquidating"
             dec = gen_decisions(sig, risk, md, fix_window, roll, cot=cot)
             gtc = gen_gtc(pos, md)
             margin = calc_margin_projection(pos, md, risk)
@@ -2188,7 +2253,8 @@ class Handler(SimpleHTTPRequestHandler):
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
                 "fixable_orders": fixable,
-                "margin_projection": margin, "contract_roll": roll, "cot": cot,
+                "margin_projection": margin, "contract_roll": roll,
+                "cot": cot, "cot_context": cot_context,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }

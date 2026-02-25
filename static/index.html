@@ -349,13 +349,14 @@ h+='<div class="ctx-row"><span class="ctx-l">20d Avg Volume</span><span class="c
 h+='<div class="ctx-row"><span class="ctx-l">Vol Ratio</span><span class="ctx-v" style="color:'+(m.vol_ratio>2?'var(--y)':m.vol_ratio<0.5?'var(--o)':'var(--tx)')+'">'+m.vol_ratio.toFixed(1)+'x</span></div>';}
 h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 var cot=d.cot;
-if(cot){h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">COT \u2014 Managed Money</div>';
+if(cot){h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><span style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px">COT \u2014 Managed Money</span><span onclick="var k=document.getElementById(\'cot-key\');k.style.display=k.style.display===\'none\'?\'block\':\'none\'" style="font-size:9px;color:var(--td);cursor:pointer;padding:1px 5px;border:1px solid var(--bd);border-radius:3px">?</span></div>';
 var mmClr=cot.mm_net>=0?'var(--g)':'var(--r)';
-h+='<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px"><span style="font-family:JetBrains Mono,monospace;font-size:22px;font-weight:700;color:'+mmClr+'">'+(cot.mm_net>=0?'+':'')+n(cot.mm_net)+'</span><span style="font-size:10px;color:var(--td)">net contracts</span></div>';
+h+='<div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:JetBrains Mono,monospace;font-size:22px;font-weight:700;color:'+mmClr+'">'+(cot.mm_net>=0?'+':'')+n(cot.mm_net)+'</span><span style="font-size:10px;color:var(--td)">net contracts</span></div>';
+h+='<div style="font-size:8px;color:var(--td);margin-bottom:6px">long minus short \u2014 positive = funds betting on higher prices</div>';
 var wcClr=cot.mm_weekly_change>=0?'var(--g)':'var(--r)';
-h+='<div class="ctx-row"><span class="ctx-l">Weekly Change</span><span class="ctx-v" style="color:'+wcClr+'">'+(cot.mm_weekly_change>=0?'+':'')+n(cot.mm_weekly_change)+'</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">Weekly Change <span style="font-size:8px;color:var(--td)">(added/cut since prior wk)</span></span><span class="ctx-v" style="color:'+wcClr+'">'+(cot.mm_weekly_change>=0?'+':'')+n(cot.mm_weekly_change)+'</span></div>';
 var cpClr=cot.mm_pct_52w>70?'var(--g)':cot.mm_pct_52w<30?'var(--r)':'var(--tx)';
-h+='<div class="ctx-row"><span class="ctx-l">52-Week Percentile</span><span class="ctx-v" style="color:'+cpClr+'">'+cot.mm_pct_52w.toFixed(0)+'th</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">52-Week Percentile <span style="font-size:8px;color:var(--td)">(rank vs past year)</span></span><span class="ctx-v" style="color:'+cpClr+'">'+cot.mm_pct_52w.toFixed(0)+'th</span></div>';
 var cRng=cot.mm_52w_high-cot.mm_52w_low;var cPos=cRng>0?((cot.mm_net-cot.mm_52w_low)/cRng*100):50;
 h+='<div class="rng-bar"><div class="rng-fill" style="width:100%"></div><div class="rng-dot" style="left:'+cPos+'%"></div></div>';
 h+='<div class="rng-labels"><span>'+n(cot.mm_52w_low)+'</span><span>'+n(cot.mm_52w_high)+'</span></div>';
@@ -365,9 +366,36 @@ else if(crwd==='LONG'){crwdClr='var(--g)';crwdBg='var(--gd)'}
 else if(crwd==='EXTREMELY_SHORT'){crwdClr='var(--o)';crwdBg='var(--od)'}
 else if(crwd==='SHORT'){crwdClr='var(--r)';crwdBg='var(--rd)'}
 h+='<div style="margin:6px 0"><span style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;background:'+crwdBg+';color:'+crwdClr+';letter-spacing:1px">'+crwd.replace(/_/g,' ')+'</span></div>';
-h+='<div class="ctx-row"><span class="ctx-l">Producers/Merchants</span><span class="ctx-v" style="color:'+(cot.prod_net>=0?'var(--g)':'var(--r)')+'">'+(cot.prod_net>=0?'+':'')+n(cot.prod_net)+'</span></div>';
-h+='<div class="ctx-row"><span class="ctx-l">Swap Dealers</span><span class="ctx-v" style="color:'+(cot.swap_net>=0?'var(--g)':'var(--r)')+'">'+(cot.swap_net>=0?'+':'')+n(cot.swap_net)+'</span></div>';
-h+='<div style="font-size:8px;color:var(--td);margin-top:4px;text-align:right">CFTC as of '+cot.report_date+'</div>';}
+if(cot.insight)h+='<div style="font-size:10px;font-style:italic;color:var(--tm);margin-bottom:6px">'+cot.insight+'</div>';
+h+='<div class="ctx-row"><span class="ctx-l">Producers/Merchants <span style="font-size:8px;color:var(--td)">(hedgers)</span></span><span class="ctx-v" style="color:'+(cot.prod_net>=0?'var(--g)':'var(--r)')+'">'+(cot.prod_net>=0?'+':'')+n(cot.prod_net)+'</span></div>';
+h+='<div class="ctx-row"><span class="ctx-l">Swap Dealers <span style="font-size:8px;color:var(--td)">(banks)</span></span><span class="ctx-v" style="color:'+(cot.swap_net>=0?'var(--g)':'var(--r)')+'">'+(cot.swap_net>=0?'+':'')+n(cot.swap_net)+'</span></div>';
+var cc=d.cot_context;
+if(cc){h+='<div style="border-top:1px solid var(--bd);margin:8px 0 6px"></div>';
+h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Since COT Report</div>';
+if(cc.price_delta!==null&&cc.price_delta!==undefined){var pDClr=cc.price_delta>=0?'var(--g)':'var(--r)';
+h+='<div class="ctx-row"><span class="ctx-l">Price Change</span><span class="ctx-v" style="color:'+pDClr+'">'+(cc.price_delta>=0?'+':'')+cc.price_delta.toFixed(4)+'</span></div>';}
+if(cc.oi_delta!==null&&cc.oi_delta!==undefined){var oiDClr=cc.oi_delta>=0?'var(--g)':'var(--r)';
+h+='<div class="ctx-row"><span class="ctx-l">OI Change</span><span class="ctx-v" style="color:'+oiDClr+'">'+(cc.oi_delta>=0?'+':'')+n(cc.oi_delta)+' contracts</span></div>';}
+if(cc.interp)h+='<div style="font-size:10px;font-style:italic;color:var(--tm);margin-top:3px">\u2192 '+cc.interp+'</div>';}
+h+='<div style="font-size:8px;color:var(--td);margin-top:4px;text-align:right">CFTC as of '+cot.report_date+' \u2014 updates Fridays</div>';
+h+='<div id="cot-key" style="display:none;margin-top:6px;padding:8px 10px;background:var(--sf2);border-radius:4px;border:1px solid var(--bd);font-size:9px;line-height:1.7;color:var(--tm)">';
+h+='<div style="font-family:JetBrains Mono,monospace;font-weight:600;color:var(--td);margin-bottom:4px;letter-spacing:1px">READING COT</div>';
+h+='<div><span style="color:var(--o)">90+</span> Crowded long \u2014 everyone\u2019s in, selloffs sharp</div>';
+h+='<div><span style="color:var(--g)">70\u201390</span> Well long \u2014 supported but less rally fuel</div>';
+h+='<div><span style="color:var(--tx)">30\u201370</span> Neutral \u2014 no positioning signal</div>';
+h+='<div><span style="color:var(--r)">10\u201330</span> Light \u2014 buying fuel on any catalyst</div>';
+h+='<div><span style="color:var(--o)">&lt;10</span> Crowded short \u2014 squeeze risk</div>';
+h+='<div style="border-top:1px solid var(--bd);margin:4px 0"></div>';
+h+='<div><b>Prod/Merch</b> \u2014 hedgers (miners, dealers). Always short = normal</div>';
+h+='<div><b>Swap Dealers</b> \u2014 banks\u2019 OTC book. Reflects client positioning</div>';
+h+='<div><b>Weekly \u0394</b> \u2014 big moves (\u00b15k+) signal momentum shift</div>';
+h+='<div style="border-top:1px solid var(--bd);margin:4px 0"></div>';
+h+='<div><b>Since COT</b> \u2014 price/OI movement since report date:</div>';
+h+='<div style="padding-left:8px">OI\u2191 + Price\u2191 = new longs entering</div>';
+h+='<div style="padding-left:8px">OI\u2191 + Price\u2193 = new shorts entering</div>';
+h+='<div style="padding-left:8px">OI\u2193 + Price\u2191 = shorts covering</div>';
+h+='<div style="padding-left:8px">OI\u2193 + Price\u2193 = longs liquidating</div>';
+h+='</div>';}
 h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 if(d.contract_roll){var crl=d.contract_roll,fml=crl.front_month,nml=crl.next_month;
 var rlc=crl.roll_color==='red'?'var(--r)':crl.roll_color==='orange'?'var(--o)':crl.roll_color==='yellow'?'var(--y)':'var(--g)';
