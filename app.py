@@ -566,15 +566,16 @@ def get_china_status():
     wd = now.weekday(); hr = now.hour
     if wd >= 5:
         return {"status": "CLOSED", "reason": "Weekend", "detail": "SHFE closed \u2014 weekend",
-                "color": "yellow", "thin_liquidity": wd == 6 and hr >= 17}
+                "color": "yellow", "thin_liquidity": wd == 6 and hr >= 17, "desc": ""}
     if hr >= 19 or hr < 2:
         return {"status": "OPEN", "reason": "Night session", "detail": "SHFE night session active",
-                "color": "green", "thin_liquidity": False}
+                "color": "green", "thin_liquidity": False,
+                "desc": "Night session \u2014 tracks US/LME overnight"}
     if 7 <= hr <= 14:
         return {"status": "CLOSED", "reason": "Between sessions", "detail": "SHFE between sessions",
-                "color": "yellow", "thin_liquidity": False}
+                "color": "yellow", "thin_liquidity": False, "desc": ""}
     return {"status": "CLOSED", "reason": "Off hours", "detail": "SHFE closed",
-            "color": "yellow", "thin_liquidity": False}
+            "color": "yellow", "thin_liquidity": False, "desc": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -599,17 +600,19 @@ def get_lme_status():
     t = hr * 60 + mn  # minutes since midnight
 
     if wd >= 5:
-        return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "weekend"}
+        return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "weekend", "desc": ""}
 
     # Ring session: 11:40 (700) - 17:00 (1020) London
     if 700 <= t < 1020:
-        return {"status": "RING", "detail": "LME RING", "color": "green", "session": "ring"}
+        return {"status": "RING", "detail": "LME RING", "color": "green", "session": "ring",
+                "desc": "Official ring \u2014 benchmark pricing, peak LME liquidity"}
 
     # LME Select electronic: 01:00 (60) - 19:00 (1140) London
     if 60 <= t < 1140:
-        return {"status": "OPEN", "detail": "LME OPEN", "color": "green", "session": "electronic"}
+        return {"status": "OPEN", "detail": "LME OPEN", "color": "green", "session": "electronic",
+                "desc": "Electronic session \u2014 steady liquidity"}
 
-    return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "closed"}
+    return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "closed", "desc": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -658,17 +661,38 @@ def get_comex_status():
 
     # Weekend: closed from Fri 4PM CT (wd=4, t>=960) to Sun 5PM CT (wd=6, t>=1020)
     if wd == 5:  # Saturday — always closed
-        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend"}
+        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend", "window": "", "desc": "", "is_peak": False}
     if wd == 6 and t < 1020:  # Sunday before 5PM CT
-        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend"}
+        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend", "window": "", "desc": "", "is_peak": False}
     if wd == 4 and t >= 960:  # Friday 4PM+ CT
-        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend"}
+        return {"status": "CLOSED", "detail": "COMEX CLOSED", "color": "red", "reason": "weekend", "window": "", "desc": "", "is_peak": False}
 
     # Daily maintenance break: 4PM-5PM CT (960-1020) Mon-Thu
     if 960 <= t < 1020 and wd <= 3:
-        return {"status": "CLOSED", "detail": "COMEX MAINT", "color": "yellow", "reason": "maintenance"}
+        return {"status": "CLOSED", "detail": "COMEX MAINT", "color": "yellow", "reason": "maintenance", "window": "", "desc": "", "is_peak": False}
 
-    return {"status": "OPEN", "detail": "COMEX OPEN", "color": "green", "reason": "globex"}
+    # OPEN — determine sub-window
+    # 7:30-10:00 AM CT (450-600): peak liquidity
+    if 450 <= t < 600:
+        window, desc, is_peak = "peak", "Peak liquidity \u2014 biggest volume, tightest spreads, most price action", True
+    # 5:00-7:30 AM CT (300-450): early session
+    elif 300 <= t < 450:
+        window, desc, is_peak = "early", "Early session \u2014 London overlap, volume building", False
+    # 10:00 AM-12:00 PM CT (600-720): midday
+    elif 600 <= t < 720:
+        window, desc, is_peak = "midday", "Midday \u2014 volume tapering, less reactive", False
+    # 12:00-4:00 PM CT (720-960): afternoon
+    elif 720 <= t < 960:
+        window, desc, is_peak = "afternoon", "Afternoon \u2014 thinner liquidity, wider spreads", False
+    # 5:00-8:00 PM CT (1020-1200): evening open
+    elif t >= 1020:
+        window, desc, is_peak = "evening", "Evening open \u2014 Asia overlap, moderate flow", False
+    # 8:00 PM-5:00 AM CT (1200-0 + 0-300): overnight
+    else:
+        window, desc, is_peak = "overnight", "Overnight \u2014 follows Shanghai/London moves", False
+
+    return {"status": "OPEN", "detail": "COMEX OPEN", "color": "green", "reason": "globex",
+            "window": window, "desc": desc, "is_peak": is_peak}
 
 
 # ---------------------------------------------------------------------------
@@ -1760,6 +1784,7 @@ def fetch_copper_data():
             "ma50": round(ma50, 4), "ma100": round(ma100, 4), "ma200": round(ma200, 4),
             "vol_ratio": round(vol_ratio, 2),
             "volume": int(vol) if vol else None, "avg_volume": int(avg_vol) if avg_vol else None,
+            "is_peak": comex_status.get("is_peak", False),
             "recent_closes": [round(c, 4) for c in recent],
             "sparkline": spark_30d, "spark_7d": spark_7d, "spark_1d": spark_1d,
             "lme_spark": lme_spark, "copper_source": copper_source,
@@ -2364,9 +2389,10 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
             st = s.get("short", "watch"); lt = s.get("long", "watch")
             st_icon = "\U0001F7E2" if st == "bull" else "\U0001F534" if st == "bear" else "\u26A0"
             lt_icon = "\U0001F7E2" if lt == "bull" else "\U0001F534" if lt == "bear" else "\u26A0"
-            watch.append(f"INTEL: {s['headline']} [{st_icon} near-term / {lt_icon} long-term]")
-            watch.append(f"INTEL_DETAIL: {st_icon} Next few days: {s['near']}")
-            watch.append(f"INTEL_DETAIL: {lt_icon} Bigger picture: {s['far']}")
+            if s.get("headline"):
+                watch.append(f"INTEL: {s['headline']} [{st_icon} near-term / {lt_icon} long-term]")
+                watch.append(f"INTEL_DETAIL: {st_icon} Next few days: {s.get('near', '')}")
+                watch.append(f"INTEL_DETAIL: {lt_icon} Bigger picture: {s.get('far', '')}")
 
     # China session
     china = md.get("china", {}) if md else {}

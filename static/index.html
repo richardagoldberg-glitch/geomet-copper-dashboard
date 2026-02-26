@@ -21,8 +21,12 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .ri{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--td)}
 .sd{width:7px;height:7px;border-radius:50%;background:var(--g);animation:p 2s infinite}
 @keyframes p{0%,100%{opacity:1}50%{opacity:.4}}
-.ch-badge{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;padding:3px 7px;border-radius:3px;letter-spacing:0.5px}
+.ch-badge{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;padding:3px 7px;border-radius:3px;letter-spacing:0.5px;display:flex;flex-direction:column;align-items:center;gap:1px}
 .ch-badge.open{background:var(--gd);color:var(--g)}.ch-badge.closed{background:var(--rd);color:var(--r)}.ch-badge.warn{background:var(--yd);color:var(--y)}
+.ch-badge.peak{font-size:12px;font-weight:800;min-width:100px;background:var(--gd);color:var(--g);animation:peakPulse 2.5s ease-in-out infinite;padding:4px 10px}
+@keyframes peakPulse{0%,100%{box-shadow:0 0 4px rgba(0,229,155,.2)}50%{box-shadow:0 0 12px rgba(0,229,155,.5)}}
+.ch-desc{font-size:7px;font-weight:400;opacity:.7;letter-spacing:0;white-space:nowrap}
+#peak-banner{display:none;width:100%;text-align:center;padding:4px 0;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:1px;background:linear-gradient(90deg,rgba(212,132,90,.18),rgba(212,132,90,.3),rgba(212,132,90,.18));color:var(--cu);border-bottom:1px solid var(--bd)}
 .db{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--bd);margin:1px;align-items:start}
 .pn{background:var(--sf);padding:20px 22px}
 .pl{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--td);margin-bottom:14px;display:flex;align-items:center;gap:6px}
@@ -262,7 +266,8 @@ body.light{--bg:#f0f2f5;--sf:#ffffff;--sf2:#e8ecf1;--bd:#d0d7e0;--tx:#1a1e24;--t
 </head>
 <body>
 <div class="hdr"><div class="hdr-l"><div class="logo"><img src="/logo.png" alt="Geomet"></div><div class="hdr-t">Copper Intelligence Dashboard</div></div>
-<div class="hdr-r"><div id="cmx" class="ch-badge closed" style="display:none"></div><div id="lme" class="ch-badge closed"></div><div id="ch" class="ch-badge closed"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
+<div class="hdr-r"><div id="cmx" class="ch-badge closed"><span class="ch-txt"></span><span class="ch-desc"></span></div><div id="lme" class="ch-badge closed"><span class="ch-txt"></span><span class="ch-desc"></span></div><div id="ch" class="ch-badge closed"><span class="ch-txt"></span><span class="ch-desc"></span></div><div id="vol-badge" class="ch-badge" style="display:none"></div><div id="si" class="ri"></div><div class="ri" id="ri">Loading...</div><button id="thm" class="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button><div class="sd" id="sd"></div></div></div>
+<div id="peak-banner">COMEX PEAK HOURS &mdash; highest volume window of the day</div>
 <div class="db" id="db"><div class="ld"><div class="ls"></div>Fetching copper data...</div></div>
 <script>
 function applyTheme(t){if(t==='light')document.body.classList.add('light');else document.body.classList.remove('light');var b=document.getElementById('thm');if(b)b.textContent=t==='light'?'\u2600\uFE0F':'\uD83C\uDF19'}
@@ -285,13 +290,24 @@ var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=
 $('ri').textContent='Updated '+d.last_refresh;
 if(pos&&pos.source_file)$('si').textContent='Source: '+pos.source_file;
 if(m&&m.china){var ch=m.china,chc=ch.status==='OPEN'?'open':ch.thin_liquidity?'warn':'closed';
-$('ch').className='ch-badge '+chc;$('ch').textContent=ch.status==='OPEN'?'SHFE OPEN':ch.detail;}
+var chEl=$('ch');chEl.className='ch-badge '+chc;
+chEl.querySelector('.ch-txt').textContent=ch.status==='OPEN'?'SHFE OPEN':ch.detail;
+chEl.querySelector('.ch-desc').textContent=ch.desc||'';}
 if(m&&m.lme){var lm=m.lme,lmc=lm.status==='CLOSED'?'warn':lm.session==='ring'?'open':'open';
-$('lme').className='ch-badge '+lmc;$('lme').textContent=lm.detail;
-if(lm.session==='ring')$('lme').style.fontWeight='800';else $('lme').style.fontWeight='';}
+var lmEl=$('lme');lmEl.className='ch-badge '+lmc;
+lmEl.querySelector('.ch-txt').textContent=lm.detail;
+lmEl.querySelector('.ch-desc').textContent=lm.desc||'';
+if(lm.session==='ring')lmEl.style.fontWeight='800';else lmEl.style.fontWeight='';}
 if(m&&m.comex){var cmx=m.comex,cmxEl=$('cmx');
-if(cmx.status==='CLOSED'){cmxEl.style.display='';cmxEl.className='ch-badge closed';cmxEl.textContent=cmx.detail;}
-else{cmxEl.style.display='none';}}
+cmxEl.className='ch-badge '+(cmx.status==='CLOSED'?'closed':cmx.is_peak?'peak':'open');
+cmxEl.querySelector('.ch-txt').textContent=cmx.detail;
+cmxEl.querySelector('.ch-desc').textContent=cmx.desc||'';}
+var pb=$('peak-banner');if(pb)pb.style.display=(m&&m.is_peak)?'block':'none';
+if(m&&m.volume&&m.avg_volume){var vb=$('vol-badge');
+var vk=Math.round(m.volume/1000)+'K';var ak=Math.round(m.avg_volume/1000)+'K';
+vb.textContent=vk+' / '+ak+' avg';
+vb.className='ch-badge '+(m.vol_ratio>1.3?'open':m.vol_ratio<0.6?'closed':'warn');
+vb.style.display='';} else {$('vol-badge').style.display='none';}
 if(!m||!s){$('db').innerHTML='<div class="ld">Unable to fetch data.</div>';return}
 var cc=m.change>=0?'up':'dn',cs=m.change>=0?'+':'',h='',cr=d.contract_roll;
 var ac=m.active_contract||'front'; // which contract the big price represents
