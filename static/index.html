@@ -239,6 +239,11 @@ color:var(--tx);font-size:11px;font-family:inherit;resize:vertical;min-height:60
 .sh-tbl .sh-so{font-family:'JetBrains Mono',monospace;font-size:9px}
 .sh-tbl .sh-cust{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Decisions */
+.dec-sec{padding:6px 10px;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+color:var(--td);border-bottom:1px solid var(--bd);border-top:1px solid var(--bd);background:var(--sf)}
+.dec-sec.sec-now{color:var(--cu);background:rgba(224,128,51,0.08)}
+.dec-sec.sec-watch{color:var(--y)}
+.dec-sec.sec-ref{color:var(--td);opacity:0.7}
 .di{padding:8px 10px;font-size:11px}
 /* Context row stack on narrow */
 .mc-ctx{flex-direction:column;gap:4px}
@@ -668,7 +673,11 @@ if(/margin/i.test(t))return 'pn-sap';
 if(/COMEX:.*MT|LME:.*MT|Global:/i.test(t))return 'pn-pp';
 if(/^INTEL:|^INTEL_DETAIL:/i.test(t))return 'pn-dp';
 return null;}
-dec.forEach(function(d){var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRICED')>=0)cls='di warn';
+dec.forEach(function(d){
+if(/^SEC:/.test(d)){var label=d.replace('SEC:','');
+var scls=label==='ACT NOW'?'sec-now':label==='WATCH TODAY'?'sec-watch':'sec-ref';
+h+='<div class="dec-sec '+scls+'">'+label+'</div>';return;}
+var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRICED')>=0)cls='di warn';
 if(d.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d.indexOf('\uD83D\uDD34')>=0)cls='di fix-bad';
 var isDetail=/^INTEL_DETAIL:/.test(d);
 var isHead=/^INTEL:/.test(d)&&!isDetail;

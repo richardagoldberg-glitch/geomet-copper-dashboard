@@ -2226,7 +2226,6 @@ def get_ship_aware_fix_suggestions(pos, schedule):
 
 
 def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
-    dec = []
     if not sig: return ["Unable to fetch market data"]
     p = md["price"] if md else 0; ft = CFG["FIX_TARGET"]
     intel = load_broker_intel()
@@ -2234,40 +2233,56 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
     streak = md.get("streak", 0) if md else 0
     streak_dir = md.get("streak_dir") if md else None
 
-    # Fix window headline
+    # Three priority buckets
+    now = []    # ACT NOW — things that need attention this morning
+    watch = []  # WATCH TODAY — important context for decisions
+    info = []   # REFERENCE — background data, less urgent
+
+    # --- ACT NOW ---
+
+    # Shipped but unpriced — highest urgency
+    if risk and risk.get("sales_unpriced_shipped_lbs", 0) > 0:
+        now.append(f"\u26A0 {risk['sales_unpriced_shipped_lbs']:,.0f} lbs shipped but UNPRICED \u2014 fix these first")
+
+    # Ship schedule — urgent shipments
+    schedule = load_ship_schedule()
+    if schedule and pos:
+        unpriced_orders = set()
+        for s in pos.get("sales_unpriced_shipped", []) + pos.get("sales_unpriced_unshipped", []):
+            unpriced_orders.add(str(s.get("order", "")))
+        urgent = []
+        upcoming = []
+        for ship in schedule:
+            so = str(ship.get("so", ""))
+            if so in unpriced_orders:
+                days_out = (datetime.strptime(ship["ship_date"], "%Y-%m-%d") - datetime.now()).days
+                entry = f"SO {so} {ship.get('grade','')} \u2192 {ship.get('customer','')[:12]} ships {ship['ship_date'][5:]}"
+                if days_out <= 0:
+                    urgent.append(entry)
+                elif days_out <= 7:
+                    upcoming.append(entry)
+        if urgent:
+            now.append(f"\U0001F534 SHIPPING TODAY/OVERDUE UNPRICED: {'; '.join(urgent)}")
+        if upcoming:
+            now.append(f"\u26A0 Ships within 7d unpriced: {'; '.join(upcoming[:3])}")
+
+    # Fix window — if strong, act now
     if fix_window:
         fw = fix_window
         if fw["score"] >= 65:
             factors_str = " + ".join(fw["factors"][:3]) if fw["factors"] else ""
-            dec.append(f"\U0001F7E2 FIX WINDOW: {fw['label']} ({fw['score']}/100) \u2014 {factors_str}")
+            now.append(f"\U0001F7E2 FIX WINDOW: {fw['label']} ({fw['score']}/100) \u2014 {factors_str}")
         elif fw["score"] <= 30:
             factors_str = " + ".join(fw["factors"][:3]) if fw["factors"] else ""
-            dec.append(f"\U0001F534 FIX WINDOW: {fw['label']} ({fw['score']}/100) \u2014 {factors_str}")
+            watch.append(f"\U0001F534 FIX WINDOW: {fw['label']} ({fw['score']}/100) \u2014 {factors_str}")
 
-    china = md.get("china", {}) if md else {}
-    if china.get("thin_liquidity"):
-        dec.append(f"\u26A0 {china.get('detail', 'SHFE closed')} \u2014 thin liquidity, watch for flash moves")
-    elif china.get("status") == "CLOSED" and china.get("reason") == "Lunar New Year":
-        dec.append(china.get("detail", "SHFE closed"))
-
-    if risk and risk.get("sales_unpriced_shipped_lbs", 0) > 0:
-        dec.append(f"\u26A0 {risk['sales_unpriced_shipped_lbs']:,.0f} lbs shipped but UNPRICED \u2014 fix these first")
-
-    if sig["move_type"] == "LIQUIDATION":
-        dec.append("Liquidation event \u2014 competitors scared. Lean into buys.")
-    elif sig["move_type"] == "FLASH_CRASH":
-        dec.append("Flash crash on thin volume \u2014 buying window.")
-    elif sig["move_type"] == "BIG_DROP":
-        dec.append("Big drop \u2014 buying opportunity.")
-    elif sig["move_type"] == "DIP":
-        dec.append("Dip day \u2014 outbid competitors, build relationships.")
-
+    # Above target — actionable
     if p >= ft and risk and risk["net_lbs"] > 0:
-        dec.append(f"ABOVE ${ft:.2f} TARGET \u2014 {risk.get('loads_unpriced',0)} loads unpriced. Fix some.")
+        now.append(f"ABOVE ${ft:.2f} TARGET \u2014 {risk.get('loads_unpriced',0)} loads unpriced. Fix some.")
     elif p >= ft - 0.10:
-        dec.append(f"${p:.4f} \u2014 approaching ${ft:.2f}. GTCs in place.")
+        watch.append(f"${p:.4f} \u2014 approaching ${ft:.2f}. GTCs in place.")
 
-    # Position range strategy (80K-400K)
+    # Position range — trim/add advice
     if risk:
         net = risk["net_lbs"]
         rmin = CFG["POSITION_RANGE_MIN"]
@@ -2290,65 +2305,108 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
         if streak >= 3 and streak_dir == "down": bullish_count += 1
         bias = "bearish" if bearish_count > bullish_count else "bullish" if bullish_count > bearish_count else "neutral"
 
+        # Over/under range is urgent
         if net > rmax:
-            dec.append(f"\U0001F534 OVER MAX ({net:,.0f} / {rmax:,.0f} lbs) \u2014 fix {round((net - rmax) / tl)}+ loads to get back in range")
+            now.append(f"\U0001F534 OVER MAX ({net:,.0f} / {rmax:,.0f} lbs) \u2014 fix {round((net - rmax) / tl)}+ loads to get back in range")
         elif net < rmin:
-            dec.append(f"UNDER FLOOR ({net:,.0f} / {rmin:,.0f} lbs) \u2014 room to add {loads_to_ceil} loads")
+            now.append(f"UNDER FLOOR ({net:,.0f} / {rmin:,.0f} lbs) \u2014 room to add {loads_to_ceil} loads")
         elif pos_pct >= 60 and bias == "bearish":
             target = rmin + int(rng * 0.2)
             trim_loads = max(1, round((net - target) / tl))
-            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 bearish signals, trim ~{trim_loads} loads toward {target:,.0f}")
+            now.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 bearish signals, trim ~{trim_loads} loads toward {target:,.0f}")
         elif pos_pct >= 60 and bias == "neutral":
-            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 mixed signals, hold but watch for trim")
+            watch.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 mixed signals, hold but watch for trim")
         elif pos_pct <= 30 and bias == "bullish":
-            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 bullish signals, room to add {loads_to_ceil} loads")
+            watch.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 bullish signals, room to add {loads_to_ceil} loads")
         elif pos_pct <= 30 and bias == "neutral":
-            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 near floor, good defensive positioning")
+            info.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 near floor, good defensive positioning")
         else:
-            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 {bias} bias, {loads_to_floor} loads above floor")
+            watch.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 {bias} bias, {loads_to_floor} loads above floor")
 
-    # Ship schedule — prioritize nearest-ship fixes
-    schedule = load_ship_schedule()
-    if schedule and pos:
-        unpriced_orders = set()
-        for s in pos.get("sales_unpriced_shipped", []) + pos.get("sales_unpriced_unshipped", []):
-            unpriced_orders.add(str(s.get("order", "")))
-        # Find unpriced orders with imminent ship dates
-        today = datetime.now().strftime("%Y-%m-%d")
-        urgent = []
-        upcoming = []
-        for ship in schedule:
-            so = str(ship.get("so", ""))
-            if so in unpriced_orders:
-                days_out = (datetime.strptime(ship["ship_date"], "%Y-%m-%d") - datetime.now()).days
-                entry = f"SO {so} {ship.get('grade','')} \u2192 {ship.get('customer','')[:12]} ships {ship['ship_date'][5:]}"
-                if days_out <= 0:
-                    urgent.append(entry)
-                elif days_out <= 7:
-                    upcoming.append(entry)
-        if urgent:
-            dec.append(f"\U0001F534 SHIPPING TODAY/OVERDUE UNPRICED: {'; '.join(urgent)}")
-        if upcoming:
-            dec.append(f"\u26A0 Ships within 7d unpriced: {'; '.join(upcoming[:3])}")
+    # Extreme move types — act now
+    if sig["move_type"] == "LIQUIDATION":
+        now.append("Liquidation event \u2014 competitors scared. Lean into buys.")
+    elif sig["move_type"] == "FLASH_CRASH":
+        now.append("Flash crash on thin volume \u2014 buying window.")
+    elif sig["move_type"] == "BIG_DROP":
+        now.append("Big drop \u2014 buying opportunity.")
+    elif sig["move_type"] == "DIP":
+        now.append("Dip day \u2014 outbid competitors, build relationships.")
 
+    # Contract roll — urgent if critical
+    if roll and roll.get("roll_urgency") in ("critical", "warning"):
+        nm_ticker = roll.get("next_month", {}).get("ticker", "next contract")
+        target = now if roll["roll_urgency"] == "critical" else watch
+        target.append(f"\u26A0 {roll['front_month']['ticker']}: {roll['roll_status']} \u2014 liquidity migrating to {nm_ticker}")
+
+    # --- WATCH TODAY ---
+
+    # Month-end / Friday pressure
+    today_dt = datetime.now()
+    dom = today_dt.day
+    dow = today_dt.weekday()
+    last_day = calendar.monthrange(today_dt.year, today_dt.month)[1]
+    trading_days_left = sum(1 for d in range(dom + 1, last_day + 1)
+                           if datetime(today_dt.year, today_dt.month, d).weekday() < 5)
+    if trading_days_left <= 3 and pct_30d >= 75:
+        watch.append(f"Month-end in {trading_days_left} trading day{'s' if trading_days_left != 1 else ''} \u2014 rebalancing selling pressure likely at {pct_30d:.0f}th pctl")
+    if dow == 4 and pct_30d >= 75:
+        watch.append(f"Friday \u2014 week-end profit-taking likely after rally ({pct_30d:.0f}th pctl)")
+
+    # S/R context
     sr = md.get("support_resistance", {}) if md else {}
-    # Context lines give plain-English S/R with near-term vs major distinction
     for ctx in sr.get("context", []):
-        dec.append(ctx)
+        watch.append(ctx)
+
+    # Broker intel headlines
+    if intel and intel.get("signals"):
+        for s in intel["signals"]:
+            st = s.get("short", "watch"); lt = s.get("long", "watch")
+            st_icon = "\U0001F7E2" if st == "bull" else "\U0001F534" if st == "bear" else "\u26A0"
+            lt_icon = "\U0001F7E2" if lt == "bull" else "\U0001F534" if lt == "bear" else "\u26A0"
+            watch.append(f"INTEL: {s['headline']} [{st_icon} near-term / {lt_icon} long-term]")
+            watch.append(f"INTEL_DETAIL: {st_icon} Next few days: {s['near']}")
+            watch.append(f"INTEL_DETAIL: {lt_icon} Bigger picture: {s['far']}")
+
+    # China session
+    china = md.get("china", {}) if md else {}
+    if china.get("thin_liquidity"):
+        watch.append(f"\u26A0 {china.get('detail', 'SHFE closed')} \u2014 thin liquidity, watch for flash moves")
+    elif china.get("status") == "CLOSED" and china.get("reason") == "Lunar New Year":
+        watch.append(china.get("detail", "SHFE closed"))
+
+    # Extended streak
+    if streak >= 4 and streak_dir == "up":
+        watch.append(f"{streak}-day up streak \u2014 extended rally, pullback risk rising")
+    elif streak >= 4 and streak_dir == "down":
+        watch.append(f"{streak}-day down streak \u2014 oversold, bounce likely")
+
+    # COT — extreme positioning is watch, otherwise info
+    if cot:
+        pct = cot.get("mm_pct_52w", 50)
+        chg = cot.get("mm_weekly_change", 0)
+        if pct >= 90:
+            watch.append(f"COT: Managed Money EXTREMELY LONG ({pct:.0f}th pctl) \u2014 crowded trade, selloff risk")
+        elif pct <= 10:
+            watch.append(f"COT: Managed Money EXTREMELY SHORT ({pct:.0f}th pctl) \u2014 squeeze potential, buying opportunity")
+        elif pct >= 70 and chg < -5000:
+            info.append(f"COT: MM long but unwinding ({chg:+,} wk) \u2014 momentum selling watch")
+        elif pct <= 30 and chg > 5000:
+            info.append(f"COT: MM short but covering ({chg:+,} wk) \u2014 rally pressure")
+
+    # --- REFERENCE ---
 
     ss = sig.get("spread_signal")
-    if ss: dec.append(ss["msg"])
+    if ss: info.append(ss["msg"])
     ds = sig.get("dxy_signal")
-    if ds and ds["direction"] != "flat": dec.append(ds["msg"])
+    if ds and ds["direction"] != "flat": info.append(ds["msg"])
 
-    # Fed context
     fed = md.get("fed", {}) if md else {}
     if fed.get("first_cut") and fed["first_cut"] != "None priced":
-        dec.append(f"Fed: {fed.get('total_cuts_2026', 0)} cut(s) priced by year-end, first in {fed['first_cut']}")
+        info.append(f"Fed: {fed.get('total_cuts_2026', 0)} cut(s) priced by year-end, first in {fed['first_cut']}")
     elif fed.get("yield_10y"):
-        dec.append(f"10Y yield: {fed['yield_10y']}% ({fed.get('yield_10y_change', 0):+.2f})")
+        info.append(f"10Y yield: {fed['yield_10y']}% ({fed.get('yield_10y_change', 0):+.2f})")
 
-    # Warehouse
     wh = md.get("warehouse") if md else None
     if wh and wh.get("mt"):
         arrow = "\u2191" if wh["trend"] == "building" else "\u2193" if wh["trend"] == "drawing" else "\u2192"
@@ -2359,63 +2417,14 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
             msg += f" / LME: {lw['mt']:,} MT {la}"
         if wh.get("global_mt"):
             msg += f" \u2014 Global: {wh['global_mt']:,} MT"
-        dec.append(msg)
+        info.append(msg)
 
-    # COT positioning
-    if cot:
-        pct = cot.get("mm_pct_52w", 50)
-        chg = cot.get("mm_weekly_change", 0)
-        if pct >= 90:
-            dec.append(f"COT: Managed Money EXTREMELY LONG ({pct:.0f}th pctl) \u2014 crowded trade, selloff risk")
-        elif pct <= 10:
-            dec.append(f"COT: Managed Money EXTREMELY SHORT ({pct:.0f}th pctl) \u2014 squeeze potential, buying opportunity")
-        elif pct >= 70 and chg < -5000:
-            dec.append(f"COT: MM long but unwinding ({chg:+,} wk) \u2014 momentum selling watch")
-        elif pct <= 30 and chg > 5000:
-            dec.append(f"COT: MM short but covering ({chg:+,} wk) \u2014 rally pressure")
-
-    # Broker intel signals (loaded earlier for position range bias calc)
-    if intel and intel.get("signals"):
-        for s in intel["signals"]:
-            st = s.get("short", "watch"); lt = s.get("long", "watch")
-            st_icon = "\U0001F7E2" if st == "bull" else "\U0001F534" if st == "bear" else "\u26A0"
-            lt_icon = "\U0001F7E2" if lt == "bull" else "\U0001F534" if lt == "bear" else "\u26A0"
-            dec.append(f"INTEL: {s['headline']} [{st_icon} near-term / {lt_icon} long-term]")
-            dec.append(f"INTEL_DETAIL: {st_icon} Next few days: {s['near']}")
-            dec.append(f"INTEL_DETAIL: {lt_icon} Bigger picture: {s['far']}")
-
-    # Month-end rebalancing pressure
-    today = datetime.now()
-    dom = today.day
-    dow = today.weekday()  # 0=Mon, 4=Fri
-    last_day = calendar.monthrange(today.year, today.month)[1]
-    trading_days_left = sum(1 for d in range(dom + 1, last_day + 1)
-                           if datetime(today.year, today.month, d).weekday() < 5)
-    if trading_days_left <= 3 and pct_30d >= 75:
-        dec.append(f"Month-end in {trading_days_left} trading day{'s' if trading_days_left != 1 else ''} \u2014 rebalancing selling pressure likely at {pct_30d:.0f}th pctl")
-    if dow == 4 and pct_30d >= 75:
-        dec.append(f"Friday \u2014 week-end profit-taking likely after rally ({pct_30d:.0f}th pctl)")
-
-    # Extended streak — mean reversion risk
-    if streak >= 4 and streak_dir == "up":
-        dec.append(f"{streak}-day up streak \u2014 extended rally, pullback risk rising")
-    elif streak >= 4 and streak_dir == "down":
-        dec.append(f"{streak}-day down streak \u2014 oversold, bounce likely")
-
-    # Contract roll alert
-    if roll and roll.get("roll_urgency") in ("critical", "warning"):
-        nm_ticker = roll.get("next_month", {}).get("ticker", "next contract")
-        dec.append(f"\u26A0 {roll['front_month']['ticker']}: {roll['roll_status']} \u2014 liquidity migrating to {nm_ticker}")
-
-    if sig.get("momentum_note"): dec.append(sig["momentum_note"])
+    if sig.get("momentum_note"): info.append(sig["momentum_note"])
 
     if risk:
         uh = risk["unhedged_lbs"]; rd = risk["risk_per_dime"]
-        if uh > 0: dec.append(f"Long {uh:,.0f} lbs unpriced \u2014 ${abs(rd):,.0f} per 10c move")
+        if uh > 0: info.append(f"Long {uh:,.0f} lbs unpriced \u2014 ${abs(rd):,.0f} per 10c move")
 
-    # (Position range logic above replaces old baseline deviation alert)
-
-    # Sales pipeline alerts — flag grades under 2 months of sales
     if risk:
         mf = CFG.get("MONTHLY_FLOW", {})
         sc = risk.get("sales_by_commodity", {})
@@ -2424,13 +2433,22 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
             if flow > 0:
                 sal = sc.get(grade, 0)
                 months = sal / flow
-                if months < 1:
-                    thin.append(f"{grade} ({months:.1f}mo)")
-                elif months < 2:
+                if months < 2:
                     thin.append(f"{grade} ({months:.1f}mo)")
         if thin:
-            dec.append(f"\u26A0 Sales pipeline thin: {', '.join(thin)} \u2014 need to sell")
+            info.append(f"\u26A0 Sales pipeline thin: {', '.join(thin)} \u2014 need to sell")
 
+    # Combine with section dividers
+    dec = []
+    if now:
+        dec.append("SEC:ACT NOW")
+        dec.extend(now)
+    if watch:
+        dec.append("SEC:WATCH TODAY")
+        dec.extend(watch)
+    if info:
+        dec.append("SEC:REFERENCE")
+        dec.extend(info)
     if not dec: dec.append("Markets stable \u2014 normal operations")
     return dec
 
