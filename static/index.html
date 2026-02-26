@@ -326,9 +326,8 @@ else if(absSp>=0.15)spTag='<span class="arb-tag arb">ARB</span>';
 h+='<div class="lr"><span class="ll">COMEX \u2194 LME</span><span class="lv" style="color:'+spc+'">'+(m.comex_lme_spread>=0?'+':'')+m.comex_lme_spread.toFixed(4)+'/lb'+spTag+'</span></div>';}
 h+='<div style="text-align:right;font-size:8px;color:var(--td);margin-top:3px">via '+m.lme_source+'</div>';
 }else{h+='<div class="lr"><span class="ll">LME</span><span style="font-size:9px;color:var(--r)">Not configured</span></div>';}
-// Charts — COMEX and LME full-width sparklines
-h+='<div class="mc-wide"><div class="mc-hdr"><span class="mc-title">COMEX 30D</span><span class="mc-val" id="mc-cx-v"></span></div><div class="mc-chart" id="mc-cx"></div><div class="mc-months" id="mc-cx-m"></div></div>';
-h+='<div class="mc-wide"><div class="mc-hdr"><span class="mc-title">LME 30D</span><span class="mc-val" id="mc-lm-v"></span></div><div class="mc-chart" id="mc-lm"></div><div class="mc-months" id="mc-lm-m"></div></div>';
+// Chart — COMEX + LME overlay
+h+='<div class="mc-wide"><div class="mc-hdr"><span class="mc-title">COMEX <span style="color:#d4845a">\u2501</span> &nbsp;LME <span style="color:#4a9eff">\u2504</span></span><span class="mc-val"><span id="mc-cx-v"></span> <span id="mc-lm-v" style="margin-left:6px"></span></span></div><div class="mc-chart" id="mc-overlay" style="height:64px"></div><div class="mc-months" id="mc-cx-m"></div></div>';
 // Context row — DXY + Warehouse + Fed
 h+='<div class="mc-ctx">';
 if(m.dxy&&m.dxy.price){var dxc=m.dxy.change>=0?'var(--r)':'var(--g)';
@@ -694,7 +693,7 @@ renderMiniCharts(m);
 }
 function mkSvg(el,data,color,data2,color2){
 if(!el||!data||!data.length)return;
-var w=el.clientWidth||80,ht=48;
+var w=el.clientWidth||80,ht=el.clientHeight||48;
 var all=data.slice();if(data2)all=all.concat(data2);
 var mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=mx-mn||1;
 function pts(p){return p.map(function(v,i){return(i/(p.length-1))*w+','+(ht-((v-mn)/rg)*(ht-4)-2)}).join(' ');}
@@ -705,9 +704,12 @@ var svg='<svg viewBox="0 0 '+w+' '+ht+'" preserveAspectRatio="none">';
 svg+='<defs><linearGradient id="gf'+el.id+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+cl+'" stop-opacity=".12"/><stop offset="100%" stop-color="'+cl+'" stop-opacity="0"/></linearGradient></defs>';
 svg+='<polygon points="0,'+ht+' '+p1+' '+w+','+ht+'" fill="url(#gf'+el.id+')"/>';
 svg+='<polyline points="'+p1+'" fill="none" stroke="'+cl+'" stroke-width="1.5" stroke-linejoin="round"/>';
+svg+='<circle cx="'+w+'" cy="'+ly+'" r="2.5" fill="'+cl+'"/>';
 if(data2&&data2.length){var p2=pts(data2);var cl2=color2||'#4a9eff';
-svg+='<polyline points="'+p2+'" fill="none" stroke="'+cl2+'" stroke-width="1" stroke-linejoin="round" stroke-dasharray="3,2"/>';}
-svg+='<circle cx="'+w+'" cy="'+ly+'" r="2" fill="'+cl+'"/></svg>';
+var last2=data2[data2.length-1];var ly2=ht-((last2-mn)/rg)*(ht-4)-2;
+svg+='<polyline points="'+p2+'" fill="none" stroke="'+cl2+'" stroke-width="1.2" stroke-linejoin="round" stroke-dasharray="4,2"/>';
+svg+='<circle cx="'+w+'" cy="'+ly2+'" r="2" fill="'+cl2+'"/>';}
+svg+='</svg>';
 el.innerHTML=svg;}
 function monthLabels(data,elId){
 var ml=$((elId));if(!ml||!data||data.length<2)return;
@@ -720,24 +722,26 @@ if(!seen[key]){seen[key]=1;labels.push({month:months[m],pos:i/(data.length-1)*10
 var h='';labels.forEach(function(l){h+='<span style="position:absolute;left:'+l.pos+'%">'+l.month+'</span>';});
 ml.style.position='relative';ml.innerHTML=h;}
 function renderMiniCharts(m){
-// 1. COMEX 30D
 var cxData=m.sparkline||[];
 var cxPts=cxData.map(function(d){return d.close});
-var cxEl=$('mc-cx'),cxV=$('mc-cx-v');
-if(cxPts.length>0){
-var last=cxPts[cxPts.length-1],first=cxPts[0],chg=last-first,up=chg>=0;
-if(cxV)cxV.innerHTML='<span style="color:'+(up?'var(--g)':'var(--r)') +'">'+(up?'+':'')+chg.toFixed(3)+'</span>';
-mkSvg(cxEl,cxPts,'#d4845a');
-monthLabels(cxData,'mc-cx-m');}
-// 2. LME 30D
 var lmData=m.lme_spark||[];
 var lmPts=lmData.map(function(d){return d.close});
-var lmEl=$('mc-lm'),lmV=$('mc-lm-v');
+var cxV=$('mc-cx-v'),lmV=$('mc-lm-v'),ovEl=$('mc-overlay');
+// COMEX change label
+if(cxPts.length>0){
+var last=cxPts[cxPts.length-1],first=cxPts[0],chg=last-first,up=chg>=0;
+if(cxV)cxV.innerHTML='<span style="color:#d4845a">CX </span><span style="color:'+(up?'var(--g)':'var(--r)') +'">'+(up?'+':'')+chg.toFixed(3)+'</span>';
+}
+// LME change label
 if(lmPts.length>=2){
 var lmLast=lmPts[lmPts.length-1],lmFirst=lmPts[0],lmChg=lmLast-lmFirst,lmUp=lmChg>=0;
-if(lmV)lmV.innerHTML='<span style="color:'+(lmUp?'var(--g)':'var(--r)') +'">'+(lmUp?'+':'')+lmChg.toFixed(3)+'</span>';
-mkSvg(lmEl,lmPts,'#4a9eff');
-monthLabels(lmData,'mc-lm-m');}
+if(lmV)lmV.innerHTML='<span style="color:#4a9eff">LME </span><span style="color:'+(lmUp?'var(--g)':'var(--r)') +'">'+(lmUp?'+':'')+lmChg.toFixed(3)+'</span>';
+}
+// Overlay chart — both series on shared scale
+if(ovEl&&cxPts.length>0){
+mkSvg(ovEl,cxPts,'#d4845a',lmPts.length>=2?lmPts:null,'#4a9eff');
+}
+monthLabels(cxData,'mc-cx-m');
 }
 // --- Placed GTC management ---
 var _gtcNotified=new Set();
