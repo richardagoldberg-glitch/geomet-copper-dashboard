@@ -694,21 +694,37 @@ renderMiniCharts(m);
 function mkSvg(el,data,color,data2,color2){
 if(!el||!data||!data.length)return;
 var w=el.clientWidth||80,ht=el.clientHeight||48;
-var all=data.slice();if(data2)all=all.concat(data2);
+// Build shared min/max from both series (skip nulls in data2)
+var all=data.slice();
+if(data2)data2.forEach(function(v){if(v!==null&&v!==undefined)all.push(v);});
 var mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=mx-mn||1;
-function pts(p){return p.map(function(v,i){return(i/(p.length-1))*w+','+(ht-((v-mn)/rg)*(ht-4)-2)}).join(' ');}
+var n=data.length;
+function xPos(i){return(i/(n-1))*w;}
+function yPos(v){return ht-((v-mn)/rg)*(ht-4)-2;}
+function pts(p){return p.map(function(v,i){return xPos(i)+','+yPos(v)}).join(' ');}
 var p1=pts(data);var last1=data[data.length-1];
-var ly=ht-((last1-mn)/rg)*(ht-4)-2;
+var ly=yPos(last1);
 var up=last1>=data[0],cl=color||(up?'#00e59b':'#ff4757');
 var svg='<svg viewBox="0 0 '+w+' '+ht+'" preserveAspectRatio="none">';
 svg+='<defs><linearGradient id="gf'+el.id+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+cl+'" stop-opacity=".12"/><stop offset="100%" stop-color="'+cl+'" stop-opacity="0"/></linearGradient></defs>';
 svg+='<polygon points="0,'+ht+' '+p1+' '+w+','+ht+'" fill="url(#gf'+el.id+')"/>';
 svg+='<polyline points="'+p1+'" fill="none" stroke="'+cl+'" stroke-width="1.5" stroke-linejoin="round"/>';
 svg+='<circle cx="'+w+'" cy="'+ly+'" r="2.5" fill="'+cl+'"/>';
-if(data2&&data2.length){var p2=pts(data2);var cl2=color2||'#4a9eff';
-var last2=data2[data2.length-1];var ly2=ht-((last2-mn)/rg)*(ht-4)-2;
-svg+='<polyline points="'+p2+'" fill="none" stroke="'+cl2+'" stroke-width="1.2" stroke-linejoin="round" stroke-dasharray="4,2"/>';
-svg+='<circle cx="'+w+'" cy="'+ly2+'" r="2" fill="'+cl2+'"/>';}
+// Second series — date-aligned, may have nulls for missing dates
+if(data2&&data2.length){var cl2=color2||'#4a9eff';
+// Build polyline segments skipping nulls
+var segs=[],cur=[];
+for(var i=0;i<data2.length;i++){
+if(data2[i]!==null&&data2[i]!==undefined){cur.push(xPos(i)+','+yPos(data2[i]));}
+else if(cur.length>0){segs.push(cur);cur=[];}
+}
+if(cur.length>0)segs.push(cur);
+segs.forEach(function(seg){if(seg.length>=2)svg+='<polyline points="'+seg.join(' ')+'" fill="none" stroke="'+cl2+'" stroke-width="1.2" stroke-linejoin="round" stroke-dasharray="4,2"/>';
+else if(seg.length===1)svg+='<circle cx="'+seg[0].split(',')[0]+'" cy="'+seg[0].split(',')[1]+'" r="1.5" fill="'+cl2+'"/>';});
+// Endpoint dot for last non-null value
+var lastIdx=-1;for(var j=data2.length-1;j>=0;j--){if(data2[j]!==null&&data2[j]!==undefined){lastIdx=j;break;}}
+if(lastIdx>=0)svg+='<circle cx="'+xPos(lastIdx)+'" cy="'+yPos(data2[lastIdx])+'" r="2" fill="'+cl2+'"/>';
+}
 svg+='</svg>';
 el.innerHTML=svg;}
 function monthLabels(data,elId){
@@ -725,7 +741,6 @@ function renderMiniCharts(m){
 var cxData=m.sparkline||[];
 var cxPts=cxData.map(function(d){return d.close});
 var lmData=m.lme_spark||[];
-var lmPts=lmData.map(function(d){return d.close});
 var cxV=$('mc-cx-v'),lmV=$('mc-lm-v'),ovEl=$('mc-overlay');
 // COMEX change label
 if(cxPts.length>0){
@@ -733,13 +748,18 @@ var last=cxPts[cxPts.length-1],first=cxPts[0],chg=last-first,up=chg>=0;
 if(cxV)cxV.innerHTML='<span style="color:#d4845a">CX </span><span style="color:'+(up?'var(--g)':'var(--r)') +'">'+(up?'+':'')+chg.toFixed(3)+'</span>';
 }
 // LME change label
-if(lmPts.length>=2){
-var lmLast=lmPts[lmPts.length-1],lmFirst=lmPts[0],lmChg=lmLast-lmFirst,lmUp=lmChg>=0;
+var lmRaw=lmData.map(function(d){return d.close});
+if(lmRaw.length>=2){
+var lmLast=lmRaw[lmRaw.length-1],lmFirst=lmRaw[0],lmChg=lmLast-lmFirst,lmUp=lmChg>=0;
 if(lmV)lmV.innerHTML='<span style="color:#4a9eff">LME </span><span style="color:'+(lmUp?'var(--g)':'var(--r)') +'">'+(lmUp?'+':'')+lmChg.toFixed(3)+'</span>';
 }
-// Overlay chart — both series on shared scale
+// Date-align LME to COMEX timeline
+var lmByDate={};
+lmData.forEach(function(d){lmByDate[d.date]=d.close;});
+var lmAligned=cxData.map(function(d){return lmByDate[d.date]||null;});
+// Overlay chart — both series on shared scale, date-aligned
 if(ovEl&&cxPts.length>0){
-mkSvg(ovEl,cxPts,'#d4845a',lmPts.length>=2?lmPts:null,'#4a9eff');
+mkSvg(ovEl,cxPts,'#d4845a',lmAligned,'#4a9eff');
 }
 monthLabels(cxData,'mc-cx-m');
 }
