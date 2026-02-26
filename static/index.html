@@ -228,6 +228,16 @@ color:var(--tx);font-size:11px;font-family:inherit;resize:vertical;min-height:60
 .intel-head{cursor:pointer}.intel-head .di-txt::after{content:' ▸';font-size:9px;opacity:0.5}
 .intel-head.open .di-txt::after{content:' ▾'}
 .intel-head.open+.intel-detail,.intel-head.open+.intel-detail+.intel-detail{display:block}
+/* Ship Schedule */
+.sh-wrap{margin-top:8px;border-top:1px solid var(--bd);padding-top:8px}
+.sh-hdr{font-size:10px;font-weight:700;color:var(--cu);margin-bottom:6px;letter-spacing:.3px}
+.sh-tbl{width:100%;font-size:10px;border-collapse:collapse}
+.sh-tbl th{text-align:left;color:var(--td);font-weight:600;padding:2px 4px;border-bottom:1px solid var(--bd);font-size:9px}
+.sh-tbl td{padding:3px 4px;border-bottom:1px solid var(--sf2)}
+.sh-tbl tr.sh-urgent td{color:var(--r);font-weight:600}
+.sh-tbl tr.sh-soon td{color:var(--y)}
+.sh-tbl .sh-so{font-family:'JetBrains Mono',monospace;font-size:9px}
+.sh-tbl .sh-cust{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Decisions */
 .di{padding:8px 10px;font-size:11px}
 /* Context row stack on narrow */
@@ -266,7 +276,7 @@ function n(v){return v?Number(v).toLocaleString():'0'}
 function $(id){return document.getElementById(id)}
 async function fd(){try{var r=await fetch('/api/data');var d=await r.json();render(d);checkGtcAlerts(d.gtc_placed||[]);$('sd').style.background='var(--g)'}catch(e){$('sd').style.background='var(--r)';$('ri').textContent='Connection error'}}
 function render(d){
-var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=d.gtc_suggestions||[],gtp=d.gtc_placed||[],cfg=d.config||{},fw=d.fix_window,fo=d.fixable_orders;
+var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=d.gtc_suggestions||[],gtp=d.gtc_placed||[],cfg=d.config||{},fw=d.fix_window,fo=d.fixable_orders,sched=d.ship_schedule||[];
 $('ri').textContent='Updated '+d.last_refresh;
 if(pos&&pos.source_file)$('si').textContent='Source: '+pos.source_file;
 if(m&&m.china){var ch=m.china,chc=ch.status==='OPEN'?'open':ch.thin_liquidity?'warn':'closed';
@@ -370,11 +380,22 @@ h+='<div class="pn tp" id="pn-tp"><div class="pl">Market</div><div class="mg">';
 h+='<div class="mr '+(x[2]?'a':'bl')+'"><span class="ml">'+x[0]+'</span><span class="mv">'+x[1].toFixed(4)+'</span><span class="ms '+(x[2]?'a':'bl')+'">'+(x[2]?'ABOVE':'BELOW')+'</span></div>';});
 h+='</div><div style="margin-top:10px"><div class="mt">'+s.trend+' ('+s.trend_strength+')</div> <div class="mt" style="margin-left:3px">'+s.move_type+'</div></div>';
 if(m.support_resistance){var sr=m.support_resistance;
-if((sr.resistance&&sr.resistance.length)||(sr.support&&sr.support.length)){
-h+='<div style="margin-top:10px"><div style="font-size:9px;color:var(--td);margin-bottom:5px;text-transform:uppercase;letter-spacing:1px">Key Levels</div>';
-if(sr.resistance)sr.resistance.slice().reverse().forEach(function(r){h+='<div class="sr-row res"><span class="sr-level" style="color:var(--r)">'+r.level.toFixed(2)+' R</span><span class="sr-dist">'+(r.distance*100).toFixed(0)+'c above</span></div>';});
+var hasNear=(sr.near_resistance&&sr.near_resistance.length)||(sr.near_support&&sr.near_support.length);
+var hasMajor=(sr.resistance&&sr.resistance.length)||(sr.support&&sr.support.length);
+if(hasNear||hasMajor){
+h+='<div style="margin-top:10px">';
+if(hasNear){
+h+='<div style="font-size:9px;color:var(--td);margin-bottom:5px;text-transform:uppercase;letter-spacing:1px">Near-Term Levels <span style="opacity:0.6">(20d)</span></div>';
+if(sr.near_resistance)sr.near_resistance.slice().reverse().forEach(function(r){h+='<div class="sr-row res"><span class="sr-level" style="color:var(--r)">'+r.level.toFixed(2)+' R</span><span class="sr-dist">'+(r.distance*100).toFixed(0)+'c above</span></div>';});
 h+='<div class="sr-row" style="border-left-color:var(--cu);background:var(--cg)"><span class="sr-level" style="color:var(--cu)">'+m.price.toFixed(2)+' \u2190 NOW</span><span class="sr-dist"></span></div>';
+if(sr.near_support)sr.near_support.forEach(function(s){h+='<div class="sr-row sup"><span class="sr-level" style="color:var(--g)">'+s.level.toFixed(2)+' S</span><span class="sr-dist">'+(s.distance*100).toFixed(0)+'c below</span></div>';});
+}
+if(hasMajor){
+h+='<div style="font-size:9px;color:var(--td);margin:8px 0 5px;text-transform:uppercase;letter-spacing:1px">Major Levels <span style="opacity:0.6">(90d)</span></div>';
+if(sr.resistance)sr.resistance.slice().reverse().forEach(function(r){h+='<div class="sr-row res"><span class="sr-level" style="color:var(--r)">'+r.level.toFixed(2)+' R</span><span class="sr-dist">'+(r.distance*100).toFixed(0)+'c above</span></div>';});
+if(!hasNear)h+='<div class="sr-row" style="border-left-color:var(--cu);background:var(--cg)"><span class="sr-level" style="color:var(--cu)">'+m.price.toFixed(2)+' \u2190 NOW</span><span class="sr-dist"></span></div>';
 if(sr.support)sr.support.forEach(function(s){h+='<div class="sr-row sup"><span class="sr-level" style="color:var(--g)">'+s.level.toFixed(2)+' S</span><span class="sr-dist">'+(s.distance*100).toFixed(0)+'c below</span></div>';});
+}
 h+='</div>';}}
 h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 if(m.range_90d){var r90l=m.range_90d[0],r90h=m.range_90d[1],r90r=r90h-r90l;
@@ -527,6 +548,21 @@ var tt=r.priced_sales_lbs+r.unpriced_sales_lbs,pp=tt>0?(r.priced_sales_lbs/tt*10
 h+='<div class="sbar"><div class="sbp" style="width:'+pp+'%"></div><div class="sbu" style="width:'+(100-pp)+'%"></div></div>';
 h+='<div class="slg"><div class="sli"><div class="sld" style="background:var(--g)"></div>Priced '+n(Math.round(r.priced_sales_lbs))+' lbs ('+pp.toFixed(0)+'%)</div>';
 h+='<div class="sli"><div class="sld" style="background:var(--p)"></div>Unpriced '+n(Math.round(r.unpriced_sales_lbs))+' lbs ('+(100-pp).toFixed(0)+'%)</div></div>';
+if(sched&&sched.length>0){
+var unpricedSOs=new Set();
+if(pos){(pos.sales_unpriced_shipped||[]).concat(pos.sales_unpriced_unshipped||[]).forEach(function(s){unpricedSOs.add(String(s.order||''));});}
+h+='<div class="sh-wrap"><div class="sh-hdr">SHIP SCHEDULE</div>';
+h+='<table class="sh-tbl"><tr><th>Ship</th><th>SO</th><th>Grade</th><th>Customer</th><th>Status</th></tr>';
+var now=new Date();now.setHours(0,0,0,0);
+sched.forEach(function(sh){
+var sd=new Date(sh.ship_date+'T00:00:00');var diff=Math.round((sd-now)/86400000);
+var cls=diff<=0?'sh-urgent':diff<=7?'sh-soon':'';
+var isUnpriced=unpricedSOs.has(String(sh.so));
+var status=isUnpriced?'<span style="color:var(--r)">UNPRICED</span>':'<span style="color:var(--g)">PRICED</span>';
+var dateLabel=diff<=0?'TODAY':diff===1?'TOMORROW':sh.ship_date.substring(5);
+h+='<tr class="'+cls+'"><td>'+dateLabel+'</td><td class="sh-so">'+sh.so+'</td><td>'+sh.grade+'</td><td class="sh-cust">'+sh.customer+'</td><td>'+status+'</td></tr>';
+});
+h+='</table></div>';}
 var shipd=pos?pos.sales_unpriced_shipped:[];
 var unshipd=pos?pos.sales_unpriced_unshipped:[];
 var cav=m.customer_availability||{};
@@ -622,7 +658,7 @@ if(/SHFE|DXY|dollar|Fed:|warehouse|COMEX.*LME|parity|arb/i.test(t))return 'pn-pp
 if(/shipped.*UNPRICED|UNPRICED.*shipped/i.test(t))return 'pn-slp';
 if(/TARGET|approaching|GTC/i.test(t))return 'pn-sp';
 if(/COT:|Managed Money|crowded|squeeze/i.test(t))return 'pn-tp';
-if(/Support|Resistance/i.test(t))return 'pn-tp';
+if(/Support|Resistance|Near-term floor|Near-term ceiling|Major support|Major resistance|breakout/i.test(t))return 'pn-tp';
 if(/migrating|roll/i.test(t))return 'pn-tp';
 if(/Long.*unpriced|unpriced.*long/i.test(t))return 'pn-posp';
 if(/POSITION.*range|OVER MAX|UNDER FLOOR/i.test(t))return 'pn-posp';

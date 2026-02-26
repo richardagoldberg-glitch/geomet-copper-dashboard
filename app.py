@@ -720,11 +720,8 @@ def compute_spread_intelligence(history, current_spread):
 # AUTO SUPPORT/RESISTANCE
 # ---------------------------------------------------------------------------
 def calc_support_resistance(closes, highs, lows):
-    if len(closes) < 20: return {"support": [], "resistance": []}
-    current = closes[-1]; swing_highs = []; swing_lows = []; lookback = 5
-    for i in range(lookback, len(highs) - lookback):
-        if highs[i] == max(highs[i-lookback:i+lookback+1]): swing_highs.append(round(highs[i], 4))
-        if lows[i] == min(lows[i-lookback:i+lookback+1]): swing_lows.append(round(lows[i], 4))
+    if len(closes) < 20: return {"support": [], "resistance": [], "near_support": [], "near_resistance": [], "context": []}
+    current = closes[-1]
 
     def cluster(levels, threshold=0.03):
         if not levels: return []
@@ -734,13 +731,65 @@ def calc_support_resistance(closes, highs, lows):
             else: clusters.append(round(sum(cc)/len(cc), 4)); cc = [levels[i]]
         clusters.append(round(sum(cc)/len(cc), 4)); return clusters
 
-    support = cluster([s for s in swing_lows if s < current])
-    resistance = cluster([r for r in swing_highs if r > current])
-    support = sorted(support, reverse=True)[:3]
-    resistance = sorted(resistance)[:3]
+    def find_swings(h, l, lookback):
+        sh = []; sl = []
+        for i in range(lookback, len(h) - lookback):
+            if h[i] == max(h[i-lookback:i+lookback+1]): sh.append(round(h[i], 4))
+            if l[i] == min(l[i-lookback:i+lookback+1]): sl.append(round(l[i], 4))
+        return sh, sl
+
+    def make_levels(sh, sl, n=3):
+        sup = sorted(cluster([s for s in sl if s < current]), reverse=True)[:n]
+        res = sorted(cluster([r for r in sh if r > current]))[:n]
+        return (
+            [{"level": s, "distance": round(current-s, 4), "distance_pct": round((current-s)/current*100, 2)} for s in sup],
+            [{"level": r, "distance": round(r-current, 4), "distance_pct": round((r-current)/current*100, 2)} for r in res],
+        )
+
+    # Major S/R — full 90-day window, lookback=5
+    major_sh, major_sl = find_swings(highs, lows, 5)
+    support, resistance = make_levels(major_sh, major_sl)
+
+    # Near-term S/R — last 20 days, lookback=3 (tighter swings)
+    near_days = min(20, len(closes))
+    near_h, near_l = highs[-near_days:], lows[-near_days:]
+    near_sh, near_sl = find_swings(near_h, near_l, 3)
+    near_support, near_resistance = make_levels(near_sh, near_sl, 2)
+
+    # Context — plain-English interpretation
+    context = []
+    if near_support:
+        ns = near_support[0]
+        # Check if major support confirms near-term (within 5c)
+        confirmed = support and abs(support[0]["level"] - ns["level"]) <= 0.05
+        if confirmed:
+            context.append(f"Near-term floor ${ns['level']:.2f} ({ns['distance']*100:.0f}c below) — confirmed by 90-day support, strong reload zone on a dip")
+        else:
+            context.append(f"Near-term floor ${ns['level']:.2f} ({ns['distance']*100:.0f}c below) — if a dip holds here, short-term trend intact")
+    if support:
+        ms = support[0]
+        if not near_support or abs(ms["level"] - near_support[0]["level"]) > 0.05:
+            context.append(f"Major support ${ms['level']:.2f} ({ms['distance']*100:.0f}c below) — break below this signals bigger trend change")
+        # Add deeper major support if available (second level)
+        if len(support) >= 2:
+            ms2 = support[1]
+            context.append(f"Deep support ${ms2['level']:.2f} ({ms2['distance']*100:.0f}c below) — worst case floor, long-term uptrend holds above here")
+    if near_resistance:
+        nr = near_resistance[0]
+        confirmed = resistance and abs(resistance[0]["level"] - nr["level"]) <= 0.05
+        if confirmed:
+            context.append(f"Near-term ceiling ${nr['level']:.2f} ({nr['distance']*100:.0f}c above) — confirmed by 90-day resistance, strong wall")
+        else:
+            context.append(f"Near-term ceiling ${nr['level']:.2f} ({nr['distance']*100:.0f}c above) — expect sellers here short-term")
+    if resistance:
+        mr = resistance[0]
+        if not near_resistance or abs(mr["level"] - near_resistance[0]["level"]) > 0.05:
+            context.append(f"Major resistance ${mr['level']:.2f} ({mr['distance']*100:.0f}c above) — breakout above means new leg higher")
+
     return {
-        "support": [{"level": s, "distance": round(current-s, 4), "distance_pct": round((current-s)/current*100, 2)} for s in support],
-        "resistance": [{"level": r, "distance": round(r-current, 4), "distance_pct": round((r-current)/current*100, 2)} for r in resistance],
+        "support": support, "resistance": resistance,
+        "near_support": near_support, "near_resistance": near_resistance,
+        "context": context,
     }
 
 
@@ -2085,11 +2134,30 @@ def save_broker_intel(text):
             "headline": "Warehouse inventories dropping",
             "near": "Physical copper is being pulled — supports prices now",
             "far": "Falling inventories mean real demand is exceeding supply. Bullish until restocked"})
-    if any(w in t for w in ["warehouse build", "inventory build", "stocks rise", "stocks increase"]):
+    if any(w in t for w in ["warehouse build", "inventory build", "stocks rise", "stocks increase", "stocks rose", "rising stocks", "inflows", "highest since"]):
         signals.append({"short": "bear", "long": "watch",
             "headline": "Warehouse inventories rising",
             "near": "More copper sitting in warehouses — less urgency to buy. Prices may soften",
             "far": "Could be seasonal or temporary restocking. Watch the trend over weeks, not days"})
+
+    # --- China physical demand signals ---
+    if any(w in t for w in ["yangshan premium", "china buying", "china import", "stockpiling", "strategic stockpil"]):
+        signals.append({"short": "bull", "long": "bull",
+            "headline": "China physical buying picking up",
+            "near": "Real demand from the biggest buyer — supports prices even during paper selling",
+            "far": "When China stockpiles copper, it tightens global supply for months. Bullish signal"})
+
+    # --- Dollar signals ---
+    if any(w in t for w in ["dollar firm", "dollar strength", "dollar index firm", "dxy rise", "dxy up", "stronger dollar"]):
+        signals.append({"short": "bear", "long": "watch",
+            "headline": "Dollar strengthening",
+            "near": "Stronger dollar makes copper more expensive globally — headwind for prices",
+            "far": "Dollar moves are usually short-lived. Fed policy drives the bigger dollar trend"})
+    if any(w in t for w in ["dollar weak", "dollar ease", "dollar fell", "dollar drop", "dxy down", "weaker dollar"]):
+        signals.append({"short": "bull", "long": "watch",
+            "headline": "Dollar weakening",
+            "near": "Weaker dollar makes copper cheaper globally — tailwind for prices",
+            "far": "If driven by rate cuts, sustained weakness supports higher copper prices"})
 
     data = {
         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -2264,12 +2332,9 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
             dec.append(f"\u26A0 Ships within 7d unpriced: {'; '.join(upcoming[:3])}")
 
     sr = md.get("support_resistance", {}) if md else {}
-    if sr.get("support"):
-        s = sr["support"][0]
-        dec.append(f"Support at ${s['level']:.2f} ({s['distance']*100:.0f}c below)")
-    if sr.get("resistance"):
-        r = sr["resistance"][0]
-        dec.append(f"Resistance at ${r['level']:.2f} ({r['distance']*100:.0f}c above)")
+    # Context lines give plain-English S/R with near-term vs major distinction
+    for ctx in sr.get("context", []):
+        dec.append(ctx)
 
     ss = sig.get("spread_signal")
     if ss: dec.append(ss["msg"])
@@ -2563,12 +2628,14 @@ class Handler(SimpleHTTPRequestHandler):
             gtc_placed = enrich_gtc_orders(load_gtc_orders(), md)
             margin = calc_margin_projection(pos, md, risk)
             fixable = calc_fixable_orders(pos, md)
+            schedule = load_ship_schedule()
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "gtc_placed": gtc_placed,
                 "fix_window": fix_window, "fixable_orders": fixable,
                 "margin_projection": margin, "contract_roll": roll,
                 "cot": cot, "cot_context": cot_context,
+                "ship_schedule": schedule,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"], "position_range_min": CFG["POSITION_RANGE_MIN"], "position_range_max": CFG["POSITION_RANGE_MAX"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
