@@ -224,10 +224,10 @@ color:var(--tx);font-size:11px;font-family:inherit;resize:vertical;min-height:60
 .intel-sig.bear{color:var(--r)}
 .intel-sig.watch{color:var(--y)}
 .intel-time{font-size:9px;color:var(--td);margin-top:4px}
-.intel-detail{padding-left:16px;font-size:10px;opacity:0.85;border-left:2px solid var(--bd);margin-left:4px;display:none}
-.intel-head{cursor:pointer}.intel-head .di-txt::after{content:' ▸';font-size:9px;opacity:0.5}
-.intel-head.open .di-txt::after{content:' ▾'}
-.intel-head.open+.intel-detail,.intel-head.open+.intel-detail+.intel-detail{display:block}
+.di.intel-detail{padding-left:16px;font-size:10px;opacity:0.85;border-left:2px solid var(--bd);margin-left:4px;display:none}
+.di.intel-head{cursor:pointer}.di.intel-head .di-txt::after{content:' ▸';font-size:9px;opacity:0.5}
+.di.intel-head.open .di-txt::after{content:' ▾'}
+.di.intel-head.open+.di.intel-detail,.di.intel-head.open+.di.intel-detail+.di.intel-detail{display:flex}
 /* Ship Schedule */
 .sh-wrap{margin-top:8px;border-top:1px solid var(--bd);padding-top:8px}
 .sh-hdr{font-size:10px;font-weight:700;color:var(--cu);margin-bottom:6px;letter-spacing:.3px}
