@@ -26,6 +26,7 @@ DATA_DIR = Path(__file__).parent / "data"
 POSITION_CSV = DATA_DIR / "geomet_position.csv"
 SPREAD_HISTORY = DATA_DIR / "spread_history.json"
 BROKER_INTEL_FILE = DATA_DIR / "broker_intel.json"
+SHIP_SCHEDULE_FILE = DATA_DIR / "ship_schedule.json"
 STATIC_DIR = Path(__file__).parent / "static"
 PORT = 8777
 
@@ -36,6 +37,7 @@ def load_config():
         "METALS_DEV_API_KEY": "", "LME_MANUAL_USD_MT": 0,
         "FIX_TARGET": 5.90, "GTC_LEVELS": [5.90, 5.95, 6.00, 6.05],
         "TRUCKLOAD_LBS": 42000, "BASELINE_LBS": 200000,
+        "POSITION_RANGE_MIN": 80000, "POSITION_RANGE_MAX": 400000,
         "ATTENTION_MOVE": 0.10, "BIG_MOVE": 0.20,
         "COMEX_WAREHOUSE_MT": 0, "COMEX_WAREHOUSE_DATE": "",
         "COMEX_WAREHOUSE_TREND": "", "FRED_API_KEY": "",
@@ -1998,39 +2000,96 @@ def load_broker_intel():
 
 
 def save_broker_intel(text):
-    """Save broker intel and extract signals."""
+    """Save broker intel and extract signals with short-term and long-term outlook."""
     signals = []
     t = text.lower()
 
-    # Bearish signals
+    # --- Demand signals ---
     if any(w in t for w in ["china backing off", "china demand weak", "china slowing", "china retreat"]):
-        signals.append({"dir": "bear", "msg": "China demand backing off — largest physical buyer pausing"})
-    if any(w in t for w in ["softer", "eases", "easing", "prices lower", "prices down", "selling pressure"]):
-        signals.append({"dir": "bear", "msg": "Prices softening — near-term selling pressure"})
-    if any(w in t for w in ["profit.taking", "profit taking", "liquidat"]):
-        signals.append({"dir": "bear", "msg": "Profit-taking / liquidation noted by brokers"})
+        signals.append({"short": "bear", "long": "watch",
+            "headline": "China pulling back",
+            "near": "Less physical buying = prices likely to drift lower next few days",
+            "far": "Usually temporary — China has been buying every dip this cycle. Watch if it lasts more than a week"})
     if any(w in t for w in ["recession", "slowdown", "contraction", "demand destruct"]):
-        signals.append({"dir": "bear", "msg": "Economic slowdown concerns — demand risk"})
+        signals.append({"short": "bear", "long": "bear",
+            "headline": "Economic slowdown concerns",
+            "near": "Traders sell copper on recession fears — expect downward pressure",
+            "far": "If real, copper demand drops for months. Major risk to being long"})
 
-    # Bullish signals
+    # --- Price action signals ---
+    if any(w in t for w in ["softer", "eases", "easing", "prices lower", "prices down", "selling pressure"]):
+        signals.append({"short": "bear", "long": "watch",
+            "headline": "Prices softening",
+            "near": "Sellers are in control right now — good time to fix if you need to trim",
+            "far": "A pullback after a run-up is normal. Doesn't change the bigger trend unless it breaks support"})
+    if any(w in t for w in ["profit.taking", "profit taking", "liquidat"]):
+        signals.append({"short": "bear", "long": "watch",
+            "headline": "Profit-taking / liquidation",
+            "near": "Funds are cashing out gains — prices drop fast during liquidation",
+            "far": "Usually creates a buying opportunity once selling exhausts itself"})
+    if any(w in t for w in ["rally", "surge", "spike", "breakout", "new high"]):
+        signals.append({"short": "bull", "long": "watch",
+            "headline": "Prices rallying",
+            "near": "Momentum buyers pushing prices up — don't chase, but don't sell into strength either",
+            "far": "Could be start of a new leg up, or could fade. Watch if it holds above prior highs"})
+
+    # --- Positioning signals ---
     if any(w in t for w in ["call option", "call oi", "calls increase", "bullish option", "bullish bet"]):
-        signals.append({"dir": "bull", "msg": "Call option OI surge — money betting on higher prices"})
+        signals.append({"short": "watch", "long": "bull",
+            "headline": "Big call option activity",
+            "near": "Could go either way short-term — sometimes it's hedging, sometimes it's speculative bets",
+            "far": "Someone is paying real money for upside exposure. Usually means smart money expects higher prices in weeks/months"})
     if any(w in t for w in ["short cover", "shorts cover", "net-short cut", "cut net-short", "short squeeze"]):
-        signals.append({"dir": "bull", "msg": "Shorts covering — bullish positioning shift"})
-    if any(w in t for w in ["supply disrupt", "supply threat", "mine shut", "mine strike", "peru", "chile", "congo", "zambia"]):
-        signals.append({"dir": "bull", "msg": "Supply disruption risk — mine/production threat"})
-    if any(w in t for w in ["stimulus", "npc", "national people", "infrastructure", "green energy", "ev demand"]):
-        signals.append({"dir": "bull", "msg": "Stimulus / infrastructure catalyst ahead"})
-    if any(w in t for w in ["warehouse draw", "inventory draw", "stocks fall", "stocks decline"]):
-        signals.append({"dir": "bull", "msg": "Warehouse draws — physical tightness"})
+        signals.append({"short": "watch", "long": "watch",
+            "headline": "Shorts reducing positions",
+            "near": "Traders closing bets on lower prices — could cause a quick pop but it's not new buying",
+            "far": "De-risking ahead of an event (NPC, tariffs). Not a strong signal either way"})
+    if any(w in t for w in ["put option", "put oi", "puts increase", "bearish option"]):
+        signals.append({"short": "watch", "long": "bear",
+            "headline": "Put option activity rising",
+            "near": "Could be hedging existing long positions or genuine bearish bets",
+            "far": "If sustained, smart money may be positioning for a move lower"})
 
-    # Neutral / awareness
+    # --- Supply signals ---
+    if any(w in t for w in ["supply disrupt", "supply threat", "mine shut", "mine strike", "peru", "chile", "congo", "zambia"]):
+        signals.append({"short": "watch", "long": "bull",
+            "headline": "Mine/supply disruption risk",
+            "near": "Threats don't move prices much until they become real disruptions",
+            "far": "Copper supply is already tight. Any actual shutdown tightens the market further — bullish for prices"})
+
+    # --- Policy / macro signals ---
+    if any(w in t for w in ["stimulus", "npc", "national people", "infrastructure", "green energy", "ev demand"]):
+        signals.append({"short": "watch", "long": "bull",
+            "headline": "Stimulus / policy catalyst ahead",
+            "near": "Markets wait for details — expect choppy trading until announcements",
+            "far": "If real spending is announced, copper demand goes up. China stimulus has driven every major copper rally"})
     if any(w in t for w in ["tariff", "duties", "trade war", "sanction"]):
-        signals.append({"dir": "watch", "msg": "Tariff / trade policy in play — volatility risk"})
+        signals.append({"short": "bear", "long": "watch",
+            "headline": "Tariff / trade policy in play",
+            "near": "Tariff headlines spook traders — expect volatility and possible dip",
+            "far": "Tariffs on China copper could actually tighten non-China supply and push US prices higher"})
     if any(w in t for w in ["fed meet", "fomc", "rate decision", "rate hike", "rate cut"]):
-        signals.append({"dir": "watch", "msg": "Fed / rate decision upcoming — watch for vol"})
+        signals.append({"short": "watch", "long": "watch",
+            "headline": "Fed / rate decision upcoming",
+            "near": "Markets go sideways ahead of Fed. Expect a move in either direction after the announcement",
+            "far": "Rate cuts = weaker dollar = higher copper. Rate hikes = opposite"})
     if any(w in t for w in ["energy policy", "white house", "policy meeting"]):
-        signals.append({"dir": "watch", "msg": "Policy meeting ahead — potential copper demand catalyst"})
+        signals.append({"short": "watch", "long": "watch",
+            "headline": "Policy meeting ahead",
+            "near": "Wait for details before acting",
+            "far": "Energy policy could boost copper demand (EVs, grid) or hurt it (tariffs, regulation)"})
+
+    # --- Inventory signals ---
+    if any(w in t for w in ["warehouse draw", "inventory draw", "stocks fall", "stocks decline"]):
+        signals.append({"short": "bull", "long": "bull",
+            "headline": "Warehouse inventories dropping",
+            "near": "Physical copper is being pulled — supports prices now",
+            "far": "Falling inventories mean real demand is exceeding supply. Bullish until restocked"})
+    if any(w in t for w in ["warehouse build", "inventory build", "stocks rise", "stocks increase"]):
+        signals.append({"short": "bear", "long": "watch",
+            "headline": "Warehouse inventories rising",
+            "near": "More copper sitting in warehouses — less urgency to buy. Prices may soften",
+            "far": "Could be seasonal or temporary restocking. Watch the trend over weeks, not days"})
 
     data = {
         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -2044,10 +2103,68 @@ def save_broker_intel(text):
     return data
 
 
-def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
+def load_ship_schedule():
+    """Load shipping schedule and return upcoming shipments sorted by date."""
+    if not SHIP_SCHEDULE_FILE.exists():
+        return []
+    try:
+        with open(SHIP_SCHEDULE_FILE) as f:
+            schedule = json.load(f)
+        today = datetime.now().strftime("%Y-%m-%d")
+        # Include today and future, sorted by ship date
+        upcoming = [s for s in schedule if s.get("ship_date", "") >= today]
+        upcoming.sort(key=lambda x: x.get("ship_date", ""))
+        return upcoming
+    except Exception:
+        return []
+
+
+def get_ship_aware_fix_suggestions(pos, schedule):
+    """Cross-reference unpriced orders with ship schedule, return fix priority list."""
+    if not pos:
+        return []
+    unpriced_shipped = pos.get("sales_unpriced_shipped", [])
+    unpriced_unshipped = pos.get("sales_unpriced_unshipped", [])
+    all_unpriced = {str(s.get("order", "")): s for s in unpriced_shipped + unpriced_unshipped}
+
+    # Build schedule lookup by SO number
+    sched_by_so = {}
+    for s in schedule:
+        so = str(s.get("so", ""))
+        if so not in sched_by_so:
+            sched_by_so[so] = s
+
+    # Tag unpriced orders with ship dates
+    fix_list = []
+    for order_num, sale in all_unpriced.items():
+        entry = dict(sale)
+        sched = sched_by_so.get(order_num)
+        if sched:
+            entry["ship_date"] = sched["ship_date"]
+            entry["delivery_date"] = sched.get("delivery_date", "")
+        else:
+            entry["ship_date"] = None
+        entry["shipped"] = sale in unpriced_shipped
+        fix_list.append(entry)
+
+    # Sort: shipped first, then by ship_date (soonest first), then no-date last
+    def sort_key(x):
+        shipped_priority = 0 if x["shipped"] else 1
+        date = x.get("ship_date") or "9999-99-99"
+        return (shipped_priority, date)
+
+    fix_list.sort(key=sort_key)
+    return fix_list
+
+
+def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
     dec = []
     if not sig: return ["Unable to fetch market data"]
     p = md["price"] if md else 0; ft = CFG["FIX_TARGET"]
+    intel = load_broker_intel()
+    pct_30d = md.get("pct_30d", 50) if md else 50
+    streak = md.get("streak", 0) if md else 0
+    streak_dir = md.get("streak_dir") if md else None
 
     # Fix window headline
     if fix_window:
@@ -2081,6 +2198,70 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
         dec.append(f"ABOVE ${ft:.2f} TARGET \u2014 {risk.get('loads_unpriced',0)} loads unpriced. Fix some.")
     elif p >= ft - 0.10:
         dec.append(f"${p:.4f} \u2014 approaching ${ft:.2f}. GTCs in place.")
+
+    # Position range strategy (80K-400K)
+    if risk:
+        net = risk["net_lbs"]
+        rmin = CFG["POSITION_RANGE_MIN"]
+        rmax = CFG["POSITION_RANGE_MAX"]
+        rng = rmax - rmin if rmax > rmin else 1
+        pos_pct = max(0, min(100, ((net - rmin) / rng) * 100))
+        tl = CFG["TRUCKLOAD_LBS"]
+        loads_to_floor = max(0, round((net - rmin) / tl))
+        loads_to_ceil = max(0, round((rmax - net) / tl))
+
+        # Determine short-term market bias from signals
+        bearish_count = 0; bullish_count = 0
+        if intel and intel.get("signals"):
+            for s in intel["signals"]:
+                if s.get("short") == "bear": bearish_count += 1
+                elif s.get("short") == "bull": bullish_count += 1
+        if pct_30d >= 85: bearish_count += 1
+        if streak >= 3 and streak_dir == "up": bearish_count += 1
+        if pct_30d <= 25: bullish_count += 1
+        if streak >= 3 and streak_dir == "down": bullish_count += 1
+        bias = "bearish" if bearish_count > bullish_count else "bullish" if bullish_count > bearish_count else "neutral"
+
+        if net > rmax:
+            dec.append(f"\U0001F534 OVER MAX ({net:,.0f} / {rmax:,.0f} lbs) \u2014 fix {round((net - rmax) / tl)}+ loads to get back in range")
+        elif net < rmin:
+            dec.append(f"UNDER FLOOR ({net:,.0f} / {rmin:,.0f} lbs) \u2014 room to add {loads_to_ceil} loads")
+        elif pos_pct >= 60 and bias == "bearish":
+            target = rmin + int(rng * 0.2)
+            trim_loads = max(1, round((net - target) / tl))
+            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 bearish signals, trim ~{trim_loads} loads toward {target:,.0f}")
+        elif pos_pct >= 60 and bias == "neutral":
+            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 mixed signals, hold but watch for trim")
+        elif pos_pct <= 30 and bias == "bullish":
+            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 bullish signals, room to add {loads_to_ceil} loads")
+        elif pos_pct <= 30 and bias == "neutral":
+            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 near floor, good defensive positioning")
+        else:
+            dec.append(f"POSITION {pos_pct:.0f}% of range ({net:,.0f} lbs) \u2014 {bias} bias, {loads_to_floor} loads above floor")
+
+    # Ship schedule — prioritize nearest-ship fixes
+    schedule = load_ship_schedule()
+    if schedule and pos:
+        unpriced_orders = set()
+        for s in pos.get("sales_unpriced_shipped", []) + pos.get("sales_unpriced_unshipped", []):
+            unpriced_orders.add(str(s.get("order", "")))
+        # Find unpriced orders with imminent ship dates
+        today = datetime.now().strftime("%Y-%m-%d")
+        urgent = []
+        upcoming = []
+        for ship in schedule:
+            so = str(ship.get("so", ""))
+            if so in unpriced_orders:
+                days_out = (datetime.strptime(ship["ship_date"], "%Y-%m-%d") - datetime.now()).days
+                entry = f"SO {so} {ship.get('grade','')} \u2192 {ship.get('customer','')[:12]} ships {ship['ship_date'][5:]}"
+                if days_out <= 0:
+                    urgent.append(entry)
+                elif days_out <= 7:
+                    upcoming.append(entry)
+        if urgent:
+            dec.append(f"\U0001F534 SHIPPING TODAY/OVERDUE UNPRICED: {'; '.join(urgent)}")
+        if upcoming:
+            dec.append(f"\u26A0 Ships within 7d unpriced: {'; '.join(upcoming[:3])}")
 
     sr = md.get("support_resistance", {}) if md else {}
     if sr.get("support"):
@@ -2128,12 +2309,15 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
         elif pct <= 30 and chg > 5000:
             dec.append(f"COT: MM short but covering ({chg:+,} wk) \u2014 rally pressure")
 
-    # Broker intel signals
-    intel = load_broker_intel()
+    # Broker intel signals (loaded earlier for position range bias calc)
     if intel and intel.get("signals"):
         for s in intel["signals"]:
-            icon = "\U0001F7E2" if s["dir"] == "bull" else "\U0001F534" if s["dir"] == "bear" else "\u26A0"
-            dec.append(f"INTEL: {icon} {s['msg']}")
+            st = s.get("short", "watch"); lt = s.get("long", "watch")
+            st_icon = "\U0001F7E2" if st == "bull" else "\U0001F534" if st == "bear" else "\u26A0"
+            lt_icon = "\U0001F7E2" if lt == "bull" else "\U0001F534" if lt == "bear" else "\u26A0"
+            dec.append(f"INTEL: {s['headline']} [{st_icon} near-term / {lt_icon} long-term]")
+            dec.append(f"INTEL_DETAIL: {st_icon} Next few days: {s['near']}")
+            dec.append(f"INTEL_DETAIL: {lt_icon} Bigger picture: {s['far']}")
 
     # Month-end rebalancing pressure
     today = datetime.now()
@@ -2142,15 +2326,12 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
     last_day = calendar.monthrange(today.year, today.month)[1]
     trading_days_left = sum(1 for d in range(dom + 1, last_day + 1)
                            if datetime(today.year, today.month, d).weekday() < 5)
-    pct_30d = md.get("pct_30d", 50) if md else 50
     if trading_days_left <= 3 and pct_30d >= 75:
         dec.append(f"Month-end in {trading_days_left} trading day{'s' if trading_days_left != 1 else ''} \u2014 rebalancing selling pressure likely at {pct_30d:.0f}th pctl")
     if dow == 4 and pct_30d >= 75:
         dec.append(f"Friday \u2014 week-end profit-taking likely after rally ({pct_30d:.0f}th pctl)")
 
     # Extended streak — mean reversion risk
-    streak = md.get("streak", 0) if md else 0
-    streak_dir = md.get("streak_dir") if md else None
     if streak >= 4 and streak_dir == "up":
         dec.append(f"{streak}-day up streak \u2014 extended rally, pullback risk rising")
     elif streak >= 4 and streak_dir == "down":
@@ -2167,16 +2348,7 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
         uh = risk["unhedged_lbs"]; rd = risk["risk_per_dime"]
         if uh > 0: dec.append(f"Long {uh:,.0f} lbs unpriced \u2014 ${abs(rd):,.0f} per 10c move")
 
-    # Baseline deviation alert (1 truckload threshold)
-    if risk and risk.get("baseline_deviation") is not None:
-        dev = risk["baseline_deviation"]
-        baseline = risk["baseline_lbs"]
-        tl = CFG["TRUCKLOAD_LBS"]
-        if abs(dev) > tl:
-            if dev > 0:
-                dec.append(f"\u26A0 {abs(dev):,.0f} lbs OVER baseline ({baseline:,.0f}) \u2014 consider pricing/trimming")
-            else:
-                dec.append(f"\u26A0 {abs(dev):,.0f} lbs UNDER baseline ({baseline:,.0f}) \u2014 look for buys")
+    # (Position range logic above replaces old baseline deviation alert)
 
     # Sales pipeline alerts — flag grades under 2 months of sales
     if risk:
@@ -2386,7 +2558,7 @@ class Handler(SimpleHTTPRequestHandler):
                                 cot_context["interp"] = "OI down + price up \u2192 shorts covering"
                             elif oi_delta < -500 and price_delta < -0.01:
                                 cot_context["interp"] = "OI down + price down \u2192 longs liquidating"
-            dec = gen_decisions(sig, risk, md, fix_window, roll, cot=cot)
+            dec = gen_decisions(sig, risk, md, fix_window, roll, cot=cot, pos=pos)
             gtc = gen_gtc(pos, md)
             gtc_placed = enrich_gtc_orders(load_gtc_orders(), md)
             margin = calc_margin_projection(pos, md, risk)
@@ -2397,7 +2569,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "fix_window": fix_window, "fixable_orders": fixable,
                 "margin_projection": margin, "contract_roll": roll,
                 "cot": cot, "cot_context": cot_context,
-                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"]},
+                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"], "position_range_min": CFG["POSITION_RANGE_MIN"], "position_range_max": CFG["POSITION_RANGE_MAX"]},
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             self.wfile.write(json.dumps(payload).encode())

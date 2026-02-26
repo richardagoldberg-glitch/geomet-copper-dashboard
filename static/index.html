@@ -224,6 +224,10 @@ color:var(--tx);font-size:11px;font-family:inherit;resize:vertical;min-height:60
 .intel-sig.bear{color:var(--r)}
 .intel-sig.watch{color:var(--y)}
 .intel-time{font-size:9px;color:var(--td);margin-top:4px}
+.intel-detail{padding-left:16px;font-size:10px;opacity:0.85;border-left:2px solid var(--bd);margin-left:4px;display:none}
+.intel-head{cursor:pointer}.intel-head .di-txt::after{content:' ▸';font-size:9px;opacity:0.5}
+.intel-head.open .di-txt::after{content:' ▾'}
+.intel-head.open+.intel-detail,.intel-head.open+.intel-detail+.intel-detail{display:block}
 /* Decisions */
 .di{padding:8px 10px;font-size:11px}
 /* Context row stack on narrow */
@@ -606,7 +610,7 @@ h+='<textarea class="intel-ta" id="intel-ta" placeholder="Paste broker email hea
 h+='<div class="intel-btns"><button class="intel-btn intel-save" onclick="saveIntel()">SAVE & ANALYZE</button><button class="intel-btn intel-clear" onclick="clearIntel()">CLEAR</button></div>';
 if(window._intelData&&window._intelData.signals&&window._intelData.signals.length){
 h+='<div class="intel-signals">';
-window._intelData.signals.forEach(function(s){h+='<div class="intel-sig '+s.dir+'">'+(s.dir==='bull'?'\uD83D\uDFE2':s.dir==='bear'?'\uD83D\uDD34':'\u26A0')+' '+s.msg+'</div>';});
+window._intelData.signals.forEach(function(s){var st=s.short||'watch',lt=s.long||'watch';var sti=st==='bull'?'\uD83D\uDFE2':st==='bear'?'\uD83D\uDD34':'\u26A0';var lti=lt==='bull'?'\uD83D\uDFE2':lt==='bear'?'\uD83D\uDD34':'\u26A0';h+='<div class="intel-sig" style="font-weight:600;margin-top:6px">'+s.headline+' ['+sti+' near / '+lti+' long]</div>';h+='<div class="intel-sig" style="padding-left:12px;opacity:0.85">'+sti+' '+s.near+'</div>';h+='<div class="intel-sig" style="padding-left:12px;opacity:0.85">'+lti+' '+s.far+'</div>';});
 h+='</div>';
 if(window._intelData.time)h+='<div class="intel-time">Updated '+window._intelData.time+'</div>';
 }
@@ -621,17 +625,23 @@ if(/COT:|Managed Money|crowded|squeeze/i.test(t))return 'pn-tp';
 if(/Support|Resistance/i.test(t))return 'pn-tp';
 if(/migrating|roll/i.test(t))return 'pn-tp';
 if(/Long.*unpriced|unpriced.*long/i.test(t))return 'pn-posp';
-if(/baseline/i.test(t))return 'pn-posp';
+if(/POSITION.*range|OVER MAX|UNDER FLOOR/i.test(t))return 'pn-posp';
+if(/SHIPPING TODAY|Ships within/i.test(t))return 'pn-slp';
 if(/pipeline.*thin|need to sell/i.test(t))return 'pn-sap';
 if(/margin/i.test(t))return 'pn-sap';
 if(/COMEX:.*MT|LME:.*MT|Global:/i.test(t))return 'pn-pp';
-if(/^INTEL:/i.test(t))return 'pn-dp';
+if(/^INTEL:|^INTEL_DETAIL:/i.test(t))return 'pn-dp';
 return null;}
 dec.forEach(function(d){var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRICED')>=0)cls='di warn';
 if(d.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d.indexOf('\uD83D\uDD34')>=0)cls='di fix-bad';
+var isDetail=/^INTEL_DETAIL:/.test(d);
+var isHead=/^INTEL:/.test(d)&&!isDetail;
+if(isDetail){cls+=' intel-detail';d=d.replace('INTEL_DETAIL: ','');}
+if(isHead){cls+=' intel-head';}
 var sec=decSec(d),jmp='';
-if(sec)jmp='<span class="di-jump" onclick="document.getElementById(\''+sec+'\').scrollIntoView({behavior:\'smooth\',block:\'start\'})" title="Jump to section">\u2191</span>';
-h+='<div class="'+cls+'"><span class="di-txt">'+d+'</span>'+jmp+'</div>';});
+if(sec&&!isDetail)jmp='<span class="di-jump" onclick="document.getElementById(\''+sec+'\').scrollIntoView({behavior:\'smooth\',block:\'start\'})" title="Jump to section">\u2191</span>';
+var click=isHead?' onclick="this.classList.toggle(\'open\')"':'';
+h+='<div class="'+cls+'"'+click+'><span class="di-txt">'+d+'</span>'+jmp+'</div>';});
 h+='</div></div>';
 $('db').innerHTML=h;
 // Render mini chart strip
