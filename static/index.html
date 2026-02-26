@@ -88,6 +88,27 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .ga{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:1px;margin-bottom:3px}
 .ga.high{color:var(--g)}.ga.medium{color:var(--y)}.ga.low{color:var(--tm)}
 .gd{font-size:11px;color:var(--tm);line-height:1.3}
+.gp-hdr{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:1.5px;color:var(--td);margin:12px 0 8px;text-transform:uppercase}
+.gp-item{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sf2);border-radius:4px;margin-bottom:5px;border-left:3px solid var(--y)}
+.gp-item.hit{border-left-color:var(--g);background:rgba(0,229,155,.08);animation:gp-pulse 1.5s ease-in-out infinite}
+@keyframes gp-pulse{0%,100%{opacity:1}50%{opacity:.7}}
+.gp-badge{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;letter-spacing:.5px;flex-shrink:0}
+.gp-badge.active{background:var(--yd);color:var(--y)}.gp-badge.hit{background:var(--gd);color:var(--g)}
+.gp-info{flex:1;min-width:0}
+.gp-line1{font-size:11px;font-weight:600;color:var(--tx)}.gp-line2{font-size:10px;color:var(--tm);margin-top:2px}
+.gp-dist{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;flex-shrink:0}
+.gp-rm{width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:3px;background:transparent;border:1px solid var(--bd);color:var(--td);font-size:11px;cursor:pointer;flex-shrink:0;transition:all .15s}
+.gp-rm:hover{background:var(--rd);border-color:var(--r);color:var(--r)}
+.gp-add-btn{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tm);cursor:pointer;padding:4px 0;letter-spacing:.5px}
+.gp-add-btn:hover{color:var(--tx)}
+.gp-form{background:var(--sf2);border-radius:4px;padding:10px;margin-top:6px;display:none}
+.gp-form.show{display:block}
+.gp-form input,.gp-form select{background:var(--bg);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:11px;padding:5px 8px;border-radius:3px;width:100%;margin-bottom:6px}
+.gp-form-row{display:flex;gap:6px}
+.gp-form-row input,.gp-form-row select{flex:1}
+.gp-form-btns{display:flex;gap:6px;margin-top:4px}
+.gp-form-btns button{font-family:'JetBrains Mono',monospace;font-size:10px;padding:5px 12px;border-radius:3px;cursor:pointer;border:none}
+.gp-form-btns .gp-save{background:var(--gd);color:var(--g)}.gp-form-btns .gp-cancel{background:var(--sf);color:var(--tm);border:1px solid var(--bd)}
 .tl{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(0,229,155,.06);border:1px dashed rgba(0,229,155,.3);border-radius:4px;margin-bottom:10px}
 .tll{font-size:10px;color:var(--g)}.tlv{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--g)}
 .nd{color:var(--td);font-style:italic;font-size:11px;padding:12px 0}
@@ -182,6 +203,27 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .pg{grid-template-columns:1fr 1fr;gap:5px}
 .pk{padding:7px 8px}
 .pkv{font-size:13px}
+/* Broker Intel */
+.intel-wrap{padding:8px 10px;border-bottom:1px solid var(--bd)}
+.intel-toggle{background:none;border:1px solid var(--bd);border-radius:4px;padding:4px 10px;font-size:10px;
+color:var(--tm);cursor:pointer;font-family:'JetBrains Mono',monospace;letter-spacing:.5px;font-weight:600}
+.intel-toggle:hover{background:var(--sf2)}
+.intel-toggle.has-intel{color:var(--y);border-color:var(--y)}
+.intel-form{display:none;margin-top:8px}
+.intel-form.open{display:block}
+.intel-ta{width:100%;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:8px;
+color:var(--tx);font-size:11px;font-family:inherit;resize:vertical;min-height:60px;outline:none}
+.intel-ta:focus{border-color:var(--cu)}
+.intel-btns{display:flex;gap:6px;margin-top:6px}
+.intel-btn{padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+.intel-save{background:var(--cu);color:#fff}
+.intel-clear{background:var(--sf2);color:var(--tm)}
+.intel-signals{margin-top:6px;font-size:10px}
+.intel-sig{padding:3px 0;color:var(--tm)}
+.intel-sig.bull{color:var(--g)}
+.intel-sig.bear{color:var(--r)}
+.intel-sig.watch{color:var(--y)}
+.intel-time{font-size:9px;color:var(--td);margin-top:4px}
 /* Decisions */
 .di{padding:8px 10px;font-size:11px}
 /* Context row stack on narrow */
@@ -208,11 +250,19 @@ function applyTheme(t){if(t==='light')document.body.classList.add('light');else 
 (function(){var t=localStorage.getItem('cu-theme');if(t)applyTheme(t);fetch('/api/theme').then(function(r){return r.json()}).then(function(d){applyTheme(d.theme);localStorage.setItem('cu-theme',d.theme)}).catch(function(){})})();
 function toggleTheme(){var l=!document.body.classList.contains('light');var t=l?'light':'dark';applyTheme(t);localStorage.setItem('cu-theme',t);fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:t})}).catch(function(){})}
 function syncTheme(){fetch('/api/theme').then(function(r){return r.json()}).then(function(d){applyTheme(d.theme);localStorage.setItem('cu-theme',d.theme)}).catch(function(){})}
+// Broker Intel
+window._intelData=null;
+function loadIntel(){fetch('/api/intel').then(function(r){return r.json()}).then(function(d){if(d&&d.date)window._intelData=d;else window._intelData=null}).catch(function(){})}
+loadIntel();
+function toggleIntel(){var f=document.getElementById('intel-form');if(f)f.classList.toggle('open')}
+function saveIntel(){var ta=document.getElementById('intel-ta');if(!ta)return;var text=ta.value.trim();if(!text)return;
+fetch('/api/intel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})}).then(function(r){return r.json()}).then(function(d){window._intelData=d;fd()}).catch(function(){})}
+function clearIntel(){fetch('/api/intel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:''})}).then(function(){window._intelData=null;fd()}).catch(function(){})}
 function n(v){return v?Number(v).toLocaleString():'0'}
 function $(id){return document.getElementById(id)}
-async function fd(){try{var r=await fetch('/api/data');var d=await r.json();render(d);$('sd').style.background='var(--g)'}catch(e){$('sd').style.background='var(--r)';$('ri').textContent='Connection error'}}
+async function fd(){try{var r=await fetch('/api/data');var d=await r.json();render(d);checkGtcAlerts(d.gtc_placed||[]);$('sd').style.background='var(--g)'}catch(e){$('sd').style.background='var(--r)';$('ri').textContent='Connection error'}}
 function render(d){
-var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=d.gtc_suggestions||[],cfg=d.config||{},fw=d.fix_window,fo=d.fixable_orders;
+var m=d.market,s=d.signals,pos=d.position,r=d.position_risk,dec=d.decisions,gtc=d.gtc_suggestions||[],gtp=d.gtc_placed||[],cfg=d.config||{},fw=d.fix_window,fo=d.fixable_orders;
 $('ri').textContent='Updated '+d.last_refresh;
 if(pos&&pos.source_file)$('si').textContent='Source: '+pos.source_file;
 if(m&&m.china){var ch=m.china,chc=ch.status==='OPEN'?'open':ch.thin_liquidity?'warn':'closed';
@@ -438,6 +488,33 @@ h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 if(cfg.fix_target)h+='<div class="tl"><span class="tll">Fix Target</span><span class="tlv">$'+cfg.fix_target.toFixed(2)+'</span></div>';
 if(gtc.length>0){gtc.forEach(function(g){h+='<div class="gi '+g.urgency+'"><div class="ga '+g.urgency+'">'+g.action+'</div><div class="gd">'+g.detail+'</div></div>';});}
 else h+='<div class="nd">No GTC suggestions</div>';
+// Placed GTC Orders
+if(gtp.length>0){
+h+='<div class="gp-hdr">Placed Orders</div>';
+gtp.forEach(function(o){
+var hit=o.triggered;
+var cls=hit?'gp-item hit':'gp-item';
+var badge=hit?'<span class="gp-badge hit">HIT</span>':'<span class="gp-badge active">GTC</span>';
+var dist='';
+if(o.distance_mt!==null&&o.distance_mt!==undefined){
+var dmt=o.distance_mt;
+var dclr=dmt>=0?'var(--g)':'var(--tm)';
+dist='<span class="gp-dist" style="color:'+dclr+'">'+(dmt>=0?'+':'')+n(Math.round(dmt))+'/MT</span>';
+}
+h+='<div class="'+cls+'" data-gtc-id="'+o.id+'">'+badge;
+h+='<div class="gp-info"><div class="gp-line1">'+o.grade+' @ $'+n(o.price_mt)+'/MT</div>';
+h+='<div class="gp-line2">'+o.customer+' \u2014 '+o.loads+' load'+(o.loads>1?'s':'')+'</div></div>';
+h+=dist;
+h+='<div class="gp-rm" onclick="removeGtc('+o.id+')" title="Remove">\u00D7</div>';
+h+='</div>';
+});
+}
+h+='<div class="gp-add-btn" onclick="toggleGtcForm()">+ Add GTC</div>';
+h+='<div class="gp-form" id="gtc-form">';
+h+='<div class="gp-form-row"><input id="gtc-cust" placeholder="Customer" value="OM Commodities"><select id="gtc-grade"><option>BB</option><option>#1</option><option>#2</option><option>Chops</option></select></div>';
+h+='<div class="gp-form-row"><input id="gtc-price" type="number" placeholder="LME Cash $/MT"><input id="gtc-loads" type="number" placeholder="Loads" value="1" min="1"></div>';
+h+='<div class="gp-form-btns"><button class="gp-save" onclick="addGtc()">Save</button><button class="gp-cancel" onclick="toggleGtcForm()">Cancel</button></div>';
+h+='</div>';
 h+='</div>';
 // Sales Orders
 h+='<div class="pn slp" id="pn-slp"><div class="pl">Sales Orders</div>';
@@ -521,7 +598,20 @@ h+='<div style="display:flex;justify-content:space-between;padding:5px 8px;backg
 }else h+='<div class="nd">No supply data</div>';
 h+='</div>';
 // Decisions — recap at bottom with jump-to-section links
-h+='<div class="pn dp s2" id="pn-dp"><div class="pl">What To Do</div><div class="dl">';
+h+='<div class="pn dp s2" id="pn-dp"><div class="pl">What To Do</div>';
+// Broker Intel input
+h+='<div class="intel-wrap"><button class="intel-toggle'+(window._intelData&&window._intelData.signals&&window._intelData.signals.length?' has-intel':'')+'" onclick="toggleIntel()">BROKER INTEL '+(window._intelData&&window._intelData.signals&&window._intelData.signals.length?'('+window._intelData.signals.length+')':'')+'</button>';
+h+='<div class="intel-form" id="intel-form">';
+h+='<textarea class="intel-ta" id="intel-ta" placeholder="Paste broker email headlines here...">'+(window._intelData&&window._intelData.raw?window._intelData.raw:'')+'</textarea>';
+h+='<div class="intel-btns"><button class="intel-btn intel-save" onclick="saveIntel()">SAVE & ANALYZE</button><button class="intel-btn intel-clear" onclick="clearIntel()">CLEAR</button></div>';
+if(window._intelData&&window._intelData.signals&&window._intelData.signals.length){
+h+='<div class="intel-signals">';
+window._intelData.signals.forEach(function(s){h+='<div class="intel-sig '+s.dir+'">'+(s.dir==='bull'?'\uD83D\uDFE2':s.dir==='bear'?'\uD83D\uDD34':'\u26A0')+' '+s.msg+'</div>';});
+h+='</div>';
+if(window._intelData.time)h+='<div class="intel-time">Updated '+window._intelData.time+'</div>';
+}
+h+='</div></div>';
+h+='<div class="dl">';
 function decSec(t){
 if(/FIX WINDOW|LIQUIDATION|FLASH|DIP|BIG.DROP|momentum/i.test(t))return 'pn-sp';
 if(/SHFE|DXY|dollar|Fed:|warehouse|COMEX.*LME|parity|arb/i.test(t))return 'pn-pp';
@@ -535,6 +625,7 @@ if(/baseline/i.test(t))return 'pn-posp';
 if(/pipeline.*thin|need to sell/i.test(t))return 'pn-sap';
 if(/margin/i.test(t))return 'pn-sap';
 if(/COMEX:.*MT|LME:.*MT|Global:/i.test(t))return 'pn-pp';
+if(/^INTEL:/i.test(t))return 'pn-dp';
 return null;}
 dec.forEach(function(d){var cls='di';if(d.indexOf('\u26A0')>=0||d.indexOf('UNPRICED')>=0)cls='di warn';
 if(d.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d.indexOf('\uD83D\uDD34')>=0)cls='di fix-bad';
@@ -592,6 +683,37 @@ var lmLast=lmPts[lmPts.length-1],lmFirst=lmPts[0],lmChg=lmLast-lmFirst,lmUp=lmCh
 if(lmV)lmV.innerHTML='<span style="color:'+(lmUp?'var(--g)':'var(--r)') +'">'+(lmUp?'+':'')+lmChg.toFixed(3)+'</span>';
 mkSvg(lmEl,lmPts,'#4a9eff');
 monthLabels(lmData,'mc-lm-m');}
+}
+// --- Placed GTC management ---
+var _gtcNotified=new Set();
+if('Notification' in window&&Notification.permission==='default'){Notification.requestPermission();}
+function checkGtcAlerts(gtp){
+if(!gtp||!gtp.length)return;
+if('Notification' in window&&Notification.permission==='granted'){
+gtp.forEach(function(o){
+if(o.triggered&&!_gtcNotified.has(o.id)){
+_gtcNotified.add(o.id);
+new Notification('GTC HIT \u2014 '+o.grade+' @ $'+Number(o.price_mt).toLocaleString(),{
+body:'LME Cash reached $'+Number(o.price_mt).toLocaleString()+'/MT \u2014 '+o.customer+' order triggered',
+icon:'/logo.png',tag:'gtc-'+o.id
+});
+}});}}
+function toggleGtcForm(){var f=$('gtc-form');if(f)f.classList.toggle('show');}
+function addGtc(){
+var cust=$('gtc-cust').value.trim();
+var grade=$('gtc-grade').value;
+var price=parseFloat($('gtc-price').value);
+var loads=parseInt($('gtc-loads').value)||1;
+if(!cust||!price){alert('Customer and price required');return;}
+fetch('/api/gtc',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({action:'add',customer:cust,grade:grade,basis:'LME_CASH',price_mt:price,loads:loads})
+}).then(function(r){return r.json()}).then(function(d){if(d.ok){toggleGtcForm();fd();}}).catch(function(e){console.error(e);});
+}
+function removeGtc(id){
+if(!confirm('Remove this GTC order?'))return;
+fetch('/api/gtc',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({action:'remove',id:id})
+}).then(function(r){return r.json()}).then(function(d){if(d.ok)fd();}).catch(function(e){console.error(e);});
 }
 fd();setInterval(fd,60000);setInterval(syncTheme,15000);
 </script>

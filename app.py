@@ -25,6 +25,7 @@ if _env_path.exists():
 DATA_DIR = Path(__file__).parent / "data"
 POSITION_CSV = DATA_DIR / "geomet_position.csv"
 SPREAD_HISTORY = DATA_DIR / "spread_history.json"
+BROKER_INTEL_FILE = DATA_DIR / "broker_intel.json"
 STATIC_DIR = Path(__file__).parent / "static"
 PORT = 8777
 
@@ -1860,6 +1861,49 @@ def gen_gtc(position, md):
     return suggestions
 
 
+# ---------------------------------------------------------------------------
+# PLACED GTC ORDERS — actual orders placed with customers
+# ---------------------------------------------------------------------------
+GTC_ORDERS_FILE = DATA_DIR / "gtc_orders.json"
+
+def load_gtc_orders():
+    if not GTC_ORDERS_FILE.exists():
+        return []
+    try:
+        with open(GTC_ORDERS_FILE) as f:
+            orders = json.load(f)
+        return [o for o in orders if o.get("status") == "active"]
+    except Exception as e:
+        print(f"[WARN] gtc_orders.json error: {e}")
+        return []
+
+def save_gtc_orders(orders):
+    with open(GTC_ORDERS_FILE, "w") as f:
+        json.dump(orders, f, indent=2)
+
+def enrich_gtc_orders(orders, md):
+    """Add distance and trigger info to each placed GTC order."""
+    if not md:
+        return orders
+    lme_cash_mt = md.get("lme_cash_mt")
+    result = []
+    for o in orders:
+        o = dict(o)  # copy
+        if o.get("basis") == "LME_CASH" and lme_cash_mt:
+            target = o["price_mt"]
+            dist = round(lme_cash_mt - target, 2)
+            o["current_mt"] = lme_cash_mt
+            o["distance_mt"] = dist
+            o["distance_pct"] = round((dist / target) * 100, 2) if target else 0
+            o["triggered"] = lme_cash_mt >= target
+        else:
+            o["triggered"] = False
+            o["distance_mt"] = None
+            o["distance_pct"] = None
+        result.append(o)
+    return result
+
+
 def calc_risk(pos, md):
     if not pos or not md: return None
     p = md["price"]; net = pos["net_lbs"]; ac = pos["avg_cost"]; hl = pos.get("hedge_lbs", 0)
@@ -1936,6 +1980,68 @@ def calc_margin_projection(pos, md, risk):
         "comex_now": round(comex, 4),
         "lme_now": round(lme, 4) if lme else None,
     }
+
+
+def load_broker_intel():
+    """Load today's broker intel from file."""
+    if not BROKER_INTEL_FILE.exists():
+        return None
+    try:
+        with open(BROKER_INTEL_FILE) as f:
+            data = json.load(f)
+        # Only return if from today
+        if data.get("date") == datetime.now().strftime("%Y-%m-%d"):
+            return data
+        return None
+    except Exception:
+        return None
+
+
+def save_broker_intel(text):
+    """Save broker intel and extract signals."""
+    signals = []
+    t = text.lower()
+
+    # Bearish signals
+    if any(w in t for w in ["china backing off", "china demand weak", "china slowing", "china retreat"]):
+        signals.append({"dir": "bear", "msg": "China demand backing off — largest physical buyer pausing"})
+    if any(w in t for w in ["softer", "eases", "easing", "prices lower", "prices down", "selling pressure"]):
+        signals.append({"dir": "bear", "msg": "Prices softening — near-term selling pressure"})
+    if any(w in t for w in ["profit.taking", "profit taking", "liquidat"]):
+        signals.append({"dir": "bear", "msg": "Profit-taking / liquidation noted by brokers"})
+    if any(w in t for w in ["recession", "slowdown", "contraction", "demand destruct"]):
+        signals.append({"dir": "bear", "msg": "Economic slowdown concerns — demand risk"})
+
+    # Bullish signals
+    if any(w in t for w in ["call option", "call oi", "calls increase", "bullish option", "bullish bet"]):
+        signals.append({"dir": "bull", "msg": "Call option OI surge — money betting on higher prices"})
+    if any(w in t for w in ["short cover", "shorts cover", "net-short cut", "cut net-short", "short squeeze"]):
+        signals.append({"dir": "bull", "msg": "Shorts covering — bullish positioning shift"})
+    if any(w in t for w in ["supply disrupt", "supply threat", "mine shut", "mine strike", "peru", "chile", "congo", "zambia"]):
+        signals.append({"dir": "bull", "msg": "Supply disruption risk — mine/production threat"})
+    if any(w in t for w in ["stimulus", "npc", "national people", "infrastructure", "green energy", "ev demand"]):
+        signals.append({"dir": "bull", "msg": "Stimulus / infrastructure catalyst ahead"})
+    if any(w in t for w in ["warehouse draw", "inventory draw", "stocks fall", "stocks decline"]):
+        signals.append({"dir": "bull", "msg": "Warehouse draws — physical tightness"})
+
+    # Neutral / awareness
+    if any(w in t for w in ["tariff", "duties", "trade war", "sanction"]):
+        signals.append({"dir": "watch", "msg": "Tariff / trade policy in play — volatility risk"})
+    if any(w in t for w in ["fed meet", "fomc", "rate decision", "rate hike", "rate cut"]):
+        signals.append({"dir": "watch", "msg": "Fed / rate decision upcoming — watch for vol"})
+    if any(w in t for w in ["energy policy", "white house", "policy meeting"]):
+        signals.append({"dir": "watch", "msg": "Policy meeting ahead — potential copper demand catalyst"})
+
+    data = {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "time": datetime.now().strftime("%H:%M"),
+        "raw": text,
+        "signals": signals,
+    }
+    DATA_DIR.mkdir(exist_ok=True)
+    with open(BROKER_INTEL_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+    return data
 
 
 def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
@@ -2021,6 +2127,13 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None):
             dec.append(f"COT: MM long but unwinding ({chg:+,} wk) \u2014 momentum selling watch")
         elif pct <= 30 and chg > 5000:
             dec.append(f"COT: MM short but covering ({chg:+,} wk) \u2014 rally pressure")
+
+    # Broker intel signals
+    intel = load_broker_intel()
+    if intel and intel.get("signals"):
+        for s in intel["signals"]:
+            icon = "\U0001F7E2" if s["dir"] == "bull" else "\U0001F534" if s["dir"] == "bear" else "\u26A0"
+            dec.append(f"INTEL: {icon} {s['msg']}")
 
     # Month-end rebalancing pressure
     today = datetime.now()
@@ -2196,6 +2309,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"theme": get_theme()}).encode())
             return
+        if self.path == "/api/intel":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            intel = load_broker_intel()
+            self.wfile.write(json.dumps(intel or {}).encode())
+            return
         if self.path == "/api/data":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -2268,12 +2388,13 @@ class Handler(SimpleHTTPRequestHandler):
                                 cot_context["interp"] = "OI down + price down \u2192 longs liquidating"
             dec = gen_decisions(sig, risk, md, fix_window, roll, cot=cot)
             gtc = gen_gtc(pos, md)
+            gtc_placed = enrich_gtc_orders(load_gtc_orders(), md)
             margin = calc_margin_projection(pos, md, risk)
             fixable = calc_fixable_orders(pos, md)
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
-                "decisions": dec, "gtc_suggestions": gtc, "fix_window": fix_window,
-                "fixable_orders": fixable,
+                "decisions": dec, "gtc_suggestions": gtc, "gtc_placed": gtc_placed,
+                "fix_window": fix_window, "fixable_orders": fixable,
                 "margin_projection": margin, "contract_roll": roll,
                 "cot": cot, "cot_context": cot_context,
                 "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"]},
@@ -2325,6 +2446,71 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({"theme": theme}).encode())
+            return
+        if self.path == "/api/intel":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            text = body.get("text", "").strip()
+            if text:
+                data = save_broker_intel(text)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode())
+            else:
+                # Empty text = clear intel
+                if BROKER_INTEL_FILE.exists():
+                    BROKER_INTEL_FILE.unlink()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"cleared":true}')
+            return
+        if self.path == "/api/gtc":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            action = body.get("action", "")
+            # Load ALL orders (including non-active) for persistence
+            all_orders = []
+            if GTC_ORDERS_FILE.exists():
+                try:
+                    with open(GTC_ORDERS_FILE) as f:
+                        all_orders = json.load(f)
+                except Exception:
+                    all_orders = []
+            resp = {"ok": False}
+            if action == "add":
+                new_id = max((o.get("id", 0) for o in all_orders), default=0) + 1
+                order = {
+                    "id": new_id,
+                    "customer": body.get("customer", ""),
+                    "grade": body.get("grade", ""),
+                    "basis": body.get("basis", "LME_CASH"),
+                    "price_mt": body.get("price_mt", 0),
+                    "loads": body.get("loads", 1),
+                    "status": "active",
+                    "created": datetime.now().strftime("%Y-%m-%d"),
+                }
+                all_orders.append(order)
+                save_gtc_orders(all_orders)
+                resp = {"ok": True, "order": order}
+            elif action == "remove":
+                oid = body.get("id")
+                all_orders = [o for o in all_orders if o.get("id") != oid]
+                save_gtc_orders(all_orders)
+                resp = {"ok": True}
+            elif action == "fill":
+                oid = body.get("id")
+                for o in all_orders:
+                    if o.get("id") == oid:
+                        o["status"] = "filled"
+                save_gtc_orders(all_orders)
+                resp = {"ok": True}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(resp).encode())
             return
         self.send_error(404)
     def log_message(self, *a): pass
