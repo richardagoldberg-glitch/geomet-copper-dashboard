@@ -4360,6 +4360,11 @@ class Handler(SimpleHTTPRequestHandler):
                 # Overlay ROM-derived live ship schedule onto pos (spreadsheet has none)
                 if pos and rom_pos and rom_pos.get("ship_schedule"):
                     pos["ship_schedule"] = rom_pos["ship_schedule"]
+                # Overlay ROM sales (has formula pricing data from OrderOverRide)
+                if pos and rom_pos:
+                    for sk in ("sales_unpriced_shipped", "sales_unpriced_unshipped", "sales_priced_unshipped"):
+                        if rom_pos.get(sk):
+                            pos[sk] = rom_pos[sk]
                 ss_pos = pos if pos and pos.get("data_source") != "ROM" else None
                 if not ss_pos:
                     _hf = find_latest_hedge_file()

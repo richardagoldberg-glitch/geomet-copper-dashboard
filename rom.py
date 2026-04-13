@@ -357,15 +357,19 @@ def _fetch_open_sales():
 
     cu_csv = _cu_ids_csv()
 
-    # Get open sales order details with customer name
+    # Get open sales order details with customer name + pricing formula
     rows = query_rom(
         f"SELECT oh.OrderID, oh.OrderType, oh.ExternalOrderNum, oh.OrderNotes, "
         f"dl.CompanyName AS CustomerName, "
         f"od.InventoryID, od.UnitsOrdered, od.UnitsShipped, od.Price, "
-        f"od.OrderDetailID, od.ItemText "
+        f"od.OrderDetailID, od.ItemText, "
+        f"ovr.BasePriceType, ovr.FormulaFactor, ovr.FormulaAmount, "
+        f"ovr.FormulaFactor2, ovr.FormulaAmount2, ovr.AgainstMarket "
         f"FROM OrderHeader oh "
         f"JOIN OrderDetails od ON oh.CompanyID = od.CompanyID AND oh.OrderID = od.OrderID "
         f"LEFT JOIN Dealers dl ON oh.CustomerID = dl.DealerID AND oh.CompanyID = dl.CompanyID "
+        f"LEFT JOIN OrderOverRide ovr ON od.CompanyID = ovr.CompanyID "
+        f"  AND od.OrderID = ovr.OrderID AND od.OrderDetailID = ovr.OrderDetailID "
         f"WHERE oh.OrderType = 1 AND oh.ClosedDate IS NULL AND oh.Void = 0 "
         f"AND od.InventoryID IN ({cu_csv}) "
         f"ORDER BY oh.OrderID"
@@ -468,11 +472,17 @@ def _fetch_open_sales():
         # Map InventoryID to shortname for display
         shortname = _INV_SHORTNAME.get(inv_id, str(inv_id))
 
-        # Determine basis from PO reference or notes
-        basis = "COMEX"
-        notes_upper = (po_ref + " " + str(row.get("OrderNotes") or "") + " " + item_text).upper()
-        if "LME" in notes_upper:
+        # Determine basis from OrderOverRide formula, fallback to text parsing
+        against_market = str(row.get("AgainstMarket") or "").upper()
+        if "LME" in against_market:
             basis = "LME"
+        elif "COMEX" in against_market or "CMX" in against_market:
+            basis = "COMEX"
+        else:
+            basis = "COMEX"
+            notes_upper = (po_ref + " " + str(row.get("OrderNotes") or "") + " " + item_text).upper()
+            if "LME" in notes_upper:
+                basis = "LME"
 
         grade = _grade_for_inv_id(inv_id)
         if grade and grade != "ICW":
@@ -486,14 +496,31 @@ def _fetch_open_sales():
         if actual_ship:
             actual_ship_str = actual_ship.strftime("%Y-%m-%d") if hasattr(actual_ship, "strftime") else str(actual_ship)[:10]
 
+        # Extract pricing formula from OrderOverRide
+        formula_factor = int(row.get("FormulaFactor") or 0)
+        formula_amount = float(row.get("FormulaAmount") or 0)
+        formula_factor2 = int(row.get("FormulaFactor2") or 0)
+        formula_amount2 = float(row.get("FormulaAmount2") or 0)
+        against_mkt_raw = str(row.get("AgainstMarket") or "")
+
+        # FormulaFactor: 4=multiply, 1=subtract, 0=none
+        spread = 0
+        if formula_factor == 4 and formula_amount > 0:
+            spread = round(formula_amount, 4)  # e.g. 0.9425
+
         sale = {
             "order": order_id,
             "consumer": customer,
             "commodity": shortname,
             "lbs": qty,
             "basis": basis,
-            "spread": 0,
+            "spread": spread,
             "poref": po_ref,
+            "formula_factor": formula_factor,
+            "formula_amount": round(formula_amount, 4) if formula_amount else 0,
+            "formula_factor2": formula_factor2,
+            "formula_amount2": round(formula_amount2, 4) if formula_amount2 else 0,
+            "against_market": against_mkt_raw,
         }
         if actual_ship_str:
             sale["actual_ship_date"] = actual_ship_str
@@ -526,14 +553,14 @@ def _fetch_open_sales():
     priced_avg = round(priced_value / priced_total, 4) if priced_total > 0 else 0
 
     # Build ship_schedule list (frontend shape) from sales that have scheduled
-    # future ship dates. Each entry pairs an SO with its earliest ship date.
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    # ship dates. Include past-due (open but not yet shipped) so they surface
+    # as overdue on the dashboard instead of silently disappearing.
     ship_schedule = []
     seen_sos = set()
     all_sales = sales_priced_unshipped + sales_unpriced_shipped + sales_unpriced_unshipped
     for s in all_sales:
         sd = s.get("expected_ship_date")
-        if not sd or sd < today_str:
+        if not sd:
             continue
         so_key = s.get("order", "")
         if so_key in seen_sos:

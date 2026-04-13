@@ -168,12 +168,13 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .so-lbs{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;width:52px;text-align:right;flex-shrink:0}
 .so-basis{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;letter-spacing:.5px;flex-shrink:0;white-space:nowrap}
 .so-basis.comex{background:var(--cg);color:var(--cu)}.so-basis.lme{background:var(--bdd);color:var(--b)}
-.so-po{font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tm);max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;opacity:.7}
+.so-po{font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tm);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;opacity:.7}
 .so-ship{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;letter-spacing:.5px;flex-shrink:0;white-space:nowrap}.so-ship.urgent{background:rgba(255,71,87,.15);color:var(--r)}.so-ship.soon{background:rgba(255,165,2,.15);color:#ffa502}.so-ship.actual{background:rgba(0,229,155,.12);color:var(--g)}
 .so-avail{flex-shrink:0;font-size:8px;width:12px;text-align:center}
 .so-avail.live{color:var(--g)}.so-avail.off{color:var(--td)}
 .so-price{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;width:56px;text-align:right;flex-shrink:0;color:var(--cu)}
 .so-price.locked{color:var(--g);font-weight:500}
+.so-price.formula{color:var(--tm);font-weight:500;font-size:9px;width:auto;min-width:56px;white-space:nowrap}
 .so-row.priced{border-left-color:var(--g);background:rgba(0,229,155,.04);opacity:.75}
 .so-hdr.priced{color:var(--g)}
 .so-grp-ctrl{display:flex;gap:2px;margin:6px 0 4px;padding:2px;background:var(--sf2);border-radius:4px}
@@ -209,6 +210,7 @@ body{font-family:'IBM Plex Sans',-apple-system,sans-serif;background:var(--bg);c
 .sh-tbl tr.sh-urgent td{color:var(--r);font-weight:600}
 .sh-tbl tr.sh-soon td{color:var(--y)}
 .sh-tbl .sh-so{font-family:'JetBrains Mono',monospace;font-size:9px}
+.sh-tbl .sh-po{font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tm);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.7}
 .sh-tbl .sh-cust{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:1400px){.db{grid-template-columns:1fr 1fr 1fr}.s2{grid-column:span 1}}
 @media(max-width:1000px){.db{grid-template-columns:1fr 1fr}}
@@ -290,6 +292,7 @@ color:var(--tx);font-size:11px;font-family:inherit;resize:vertical;min-height:60
 .sh-tbl tr.sh-urgent td{color:var(--r);font-weight:600}
 .sh-tbl tr.sh-soon td{color:var(--y)}
 .sh-tbl .sh-so{font-family:'JetBrains Mono',monospace;font-size:9px}
+.sh-tbl .sh-po{font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--tm);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.7}
 .sh-tbl .sh-cust{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Decisions */
 .dec-sec{padding:6px 10px;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;
@@ -421,46 +424,6 @@ h+='<div style="display:flex;align-items:baseline;padding:2px 10px;opacity:0.6">
 if(m.lme_cash_3m_spread_mt){h+='<span style="margin-left:auto;'+_nf+';font-size:10px;color:var(--y)">+$'+m.lme_cash_3m_spread_mt+'/MT</span>';}
 h+='</div>';}
 }else{h+='<div style="padding:6px 10px"><span style="'+_lw+'">LME</span> <span style="font-size:9px;color:var(--r)">Awaiting price</span></div>';}
-// COMEX vs LME arbitrage box
-if(m.comex_lme_spread!==null&&m.comex_lme_spread!==undefined&&m.lme_price_lb){
-var sp=m.comex_lme_spread,absSp=Math.abs(sp);
-var cxHi=sp>=0,hiEx=cxHi?'COMEX':'LME',loEx=cxHi?'LME':'COMEX';
-var hiP=cxHi?m.price:m.lme_price_lb,loP=cxHi?m.lme_price_lb:m.price;
-var hiClr=cxHi?'#d4845a':'#4a9eff',loClr=cxHi?'#4a9eff':'#d4845a';
-var tBdg='';
-if(m.spread_timing==='peak')tBdg='<span class="spread-note">(peak hrs)</span>';
-else if(m.spread_timing==='stale')tBdg='<span class="spread-note">(approx)</span>';
-var arbLvl='',arbClr='var(--td)';
-if(absSp>=0.15){arbLvl='ARB OPPORTUNITY';arbClr='var(--g)';}
-else if(absSp>=0.08){arbLvl='NOTABLE SPREAD';arbClr='var(--y)';}
-else if(absSp>=0.03){arbLvl='SLIGHT PREMIUM';arbClr='var(--tm)';}
-else{arbLvl='PARITY';arbClr='var(--td)';}
-h+='<div style="background:var(--sf2);border-radius:4px;padding:8px 10px;margin-top:6px'+(absSp>=0.15?';border-left:3px solid var(--g)':absSp>=0.08?';border-left:3px solid var(--y)':'')+'">';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;letter-spacing:1px;color:'+arbClr+'">'+arbLvl+'</span>'+tBdg+'</div>';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">';
-h+='<span style="font-family:JetBrains Mono,monospace;font-size:9px;color:'+hiClr+';font-weight:600">'+hiEx+'</span>';
-h+='<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:var(--tx)">'+flb(hiP)+'<span style="font-size:9px;color:var(--td)">/lb</span></span></div>';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">';
-h+='<span style="font-family:JetBrains Mono,monospace;font-size:9px;color:'+loClr+';font-weight:600">'+loEx+'</span>';
-h+='<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:var(--tm)">'+flb(loP)+'<span style="font-size:9px;color:var(--td)">/lb</span></span></div>';
-h+='<div style="text-align:right;margin-top:2px"><span style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;color:'+arbClr+'">+'+flb(absSp)+' spread</span></div>';
-if(r&&(r.comex_sales_lbs||r.lme_sales_lbs||r.comex_hedge_lbs||r.lme_hedge_lbs)){
-var cxS=r.comex_sales_lbs||0,lmS=r.lme_sales_lbs||0,totS=cxS+lmS;
-var cxH=r.comex_hedge_lbs||0,lmH=r.lme_hedge_lbs||0;
-var cxPct=totS>0?Math.round(cxS/totS*100):0,lmPct=totS>0?Math.round(lmS/totS*100):0;
-var ctx='';
-if(absSp>=0.05&&totS>0){
-var heavySide=cxPct>=lmPct?'COMEX':'LME';
-if(heavySide===hiEx)ctx='<span style="color:var(--g)">You\u2019re '+cxPct+'% '+heavySide+' \u2014 selling the premium</span>';
-else ctx='<span style="color:var(--y)">You\u2019re '+Math.max(cxPct,lmPct)+'% '+heavySide+' \u2014 '+hiEx+' pays more</span>';
-}
-h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--bd)">';
-h+='<div style="font-size:9px;color:var(--tm)">Sales: <span style="color:#d4845a">CX '+n(cxS)+'</span> / <span style="color:#4a9eff">LME '+n(lmS)+'</span></div>';
-h+='<div style="font-size:9px;color:var(--tm)">Hedges: <span style="color:#d4845a">'+n(cxH)+'</span> / <span style="color:#4a9eff">'+n(lmH)+'</span></div></div>';
-if(ctx)h+='<div style="font-family:JetBrains Mono,monospace;font-size:9px;margin-top:4px">'+ctx+'</div>';
-}
-h+='</div>';
-}
 // Compact range/percentile/streak/volume strip
 h+='<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bd)">';
 if(m.range_90d){var r90l=m.range_90d[0],r90h=m.range_90d[1],r90r=r90h-r90l;
@@ -495,77 +458,8 @@ h+='<div style="display:flex;align-items:baseline;gap:6px"><span style="font-fam
 h+='<div style="text-align:right"><div style="font-family:\'IBM Plex Sans\',sans-serif;font-size:15px;font-weight:800;color:'+_gmClr+'">'+_mp.margin_pct.toFixed(1)+'%</div>';
 h+='<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:var(--tm);margin-top:2px">$'+n(Math.round(_mp.total_gross_margin))+'</div></div>';
 h+='</div>';
-var _unpLbs=_mp.unpriced_lbs||0;
-if(_unpLbs>0){var _perCent=Math.round(_unpLbs*0.01);
-var _sensClr=_perCent>5000?'var(--r)':_perCent>2000?'var(--y)':'var(--tm)';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid '+_gmBdr+'">';
-h+='<span style="font-family:JetBrains Mono,monospace;font-size:9px;color:var(--td)">'+n(_unpLbs)+' lbs unpriced</span>';
-h+='<span style="font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;color:'+_sensClr+'">\u00B1$'+n(_perCent)+' per 1\u00A2</span>';
-h+='</div>';}
 h+='</div>';
 }
-// Strategy signal — fix vs new spreads (per Geomet playbook)
-var _stCh=m.lme_change_pct||m.change_pct||0;var _stP30=m.pct_30d;
-var _stMode=null,_stLbl='',_stClr='',_stIco='',_stWhy='';
-if(_stCh>=1.5||(_stP30!==undefined&&_stP30>=65)){
-_stMode='fix';_stLbl='Good time to fix price';_stClr='var(--y)';_stIco='\u2191';
-var _stP1=_stCh>=1.5?'LME +'+_stCh.toFixed(1)+'% today':'';
-var _stP2=(_stP30!==undefined&&_stP30>=65)?_stP30+'th pctile (30d)':'';
-_stWhy=[_stP1,_stP2].filter(function(x){return x;}).join(' \u00B7 ');
-}else if(_stCh<=-1.5||(_stP30!==undefined&&_stP30<=35)){
-_stMode='spread';_stLbl='Good time to get new spreads';_stClr='var(--b)';_stIco='\u2193';
-var _stQ1=_stCh<=-1.5?'LME '+_stCh.toFixed(1)+'% today':'';
-var _stQ2=(_stP30!==undefined&&_stP30<=35)?_stP30+'th pctile (30d)':'';
-_stWhy=[_stQ1,_stQ2].filter(function(x){return x;}).join(' \u00B7 ');
-}
-if(_stMode){
-h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--sf2);border-radius:4px;margin-top:8px;border-left:3px solid '+_stClr+'">';
-h+='<span style="font-family:JetBrains Mono,monospace;font-size:16px;font-weight:700;color:'+_stClr+';line-height:1">'+_stIco+'</span>';
-h+='<div style="flex:1;min-width:0"><div style="font-family:\'IBM Plex Sans\',sans-serif;font-size:11px;font-weight:700;color:'+_stClr+';letter-spacing:.3px">'+_stLbl+'</div>';
-if(_stWhy)h+='<div style="font-family:JetBrains Mono,monospace;font-size:8px;color:var(--td);margin-top:1px">'+_stWhy+'</div>';
-h+='</div></div>';
-}
-// Posture badge
-if(r&&r.baseline_deviation!==undefined&&r.baseline_deviation!==null){var bd=r.baseline_deviation,abd=Math.abs(bd),bl=r.baseline_lbs,tl=cfg.truckload_lbs||42000;
-var posture,pclr;
-if(abd<=tl){posture='NEUTRAL';pclr='var(--g)';}
-else if(bd>0&&abd<=tl*2){posture='SLIGHTLY LONG';pclr='var(--b)';}
-else if(bd>0&&abd<=tl*4){posture='AGGRESSIVE';pclr='var(--y)';}
-else if(bd>0){posture='VERY AGGRESSIVE';pclr='var(--r)';}
-else if(bd<0&&abd<=tl*2){posture='SLIGHTLY LIGHT';pclr='var(--b)';}
-else if(bd<0&&abd<=tl*4){posture='CONSERVATIVE';pclr='var(--y)';}
-else{posture='VERY CONSERVATIVE';pclr='var(--r)';}
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--sf2);border-radius:4px;margin-top:8px;border-left:3px solid '+pclr+'"><span style="font-size:10px;color:var(--tm)">Posture vs Baseline</span><span style="font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;letter-spacing:.5px;color:'+pclr+'">'+posture+'</span></div>';}
-// ACT NOW bullets — extracted from dec[]
-var actNow=[],_inAct=false;
-(dec||[]).forEach(function(it){
-if(/^SEC:/.test(it)){_inAct=(it==='SEC:ACT NOW');return;}
-if(_inAct)actNow.push(it);
-});
-if(actNow.length){
-h+='<div class="dec-sec sec-now" style="margin-top:10px">ACT NOW</div>';
-h+='<div class="dl">';
-actNow.forEach(function(d2){
-var cls='di';if(d2.indexOf('\u26A0')>=0||d2.indexOf('UNPRICED')>=0)cls='di warn';
-if(d2.indexOf('\uD83D\uDFE2')>=0)cls='di fix-good';if(d2.indexOf('\uD83D\uDD34')>=0)cls='di fix-bad';
-h+='<div class="'+cls+'"><span class="di-txt">'+d2+'</span></div>';
-});
-h+='</div>';
-}else{
-h+='<div style="margin-top:10px;padding:10px;text-align:center;font-size:9px;color:var(--td);font-style:italic">No urgent calls right now.</div>';
-}
-// Broker Intel input (reuses same id; only one layout renders at a time)
-h+='<div class="intel-wrap" style="margin-top:10px"><button class="intel-toggle'+(window._intelData&&window._intelData.signals&&window._intelData.signals.length?' has-intel':'')+'" onclick="toggleIntel()">BROKER INTEL '+(window._intelData&&window._intelData.signals&&window._intelData.signals.length?'('+window._intelData.signals.length+')':'')+'</button>';
-h+='<div class="intel-form" id="intel-form">';
-h+='<textarea class="intel-ta" id="intel-ta" placeholder="Paste broker email headlines here...">'+(window._intelData&&window._intelData.raw?window._intelData.raw:'')+'</textarea>';
-h+='<div class="intel-btns"><button class="intel-btn intel-save" onclick="saveIntel()">SAVE & ANALYZE</button><button class="intel-btn intel-clear" onclick="clearIntel()">CLEAR</button></div>';
-if(window._intelData&&window._intelData.signals&&window._intelData.signals.length){
-h+='<div class="intel-signals">';
-window._intelData.signals.forEach(function(s2){var st=s2.short||'watch',lt=s2.long||'watch';var sti=st==='bull'?'\uD83D\uDFE2':st==='bear'?'\uD83D\uDD34':'\u26A0';var lti=lt==='bull'?'\uD83D\uDFE2':lt==='bear'?'\uD83D\uDD34':'\u26A0';h+='<div class="intel-sig" style="font-weight:600;margin-top:6px">'+s2.headline+' ['+sti+' near / '+lti+' long]</div>';h+='<div class="intel-sig" style="padding-left:12px;opacity:0.85">'+sti+' '+s2.near+'</div>';h+='<div class="intel-sig" style="padding-left:12px;opacity:0.85">'+lti+' '+s2.far+'</div>';});
-h+='</div>';
-if(window._intelData.time)h+='<div class="intel-time">Updated '+window._intelData.time+'</div>';
-}
-h+='</div></div>';
 h+='</div>'; // end Card 2
 
 // ============ CARD 3: POSITION & PIPELINE ============
@@ -585,7 +479,7 @@ h+='<div style="font-size:10px;line-height:1.6">';
 h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>Inv <span style="color:var(--td)">'+n(Math.round(r.inventory_cu_lbs))+'</span> + PO <span style="color:var(--td)">'+n(Math.round(r.po_lbs))+'</span>'+(unprShip>0?' + Ship <span style="color:var(--td)">'+n(Math.round(unprShip))+'</span>':'')+'</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;color:var(--cu)">'+n(Math.round(invPo))+'</span></div>';
 h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>\u2212 Priced SO</span><span style="font-family:JetBrains Mono,monospace;font-weight:600;color:var(--g)">'+n(Math.round(pricedUn))+'</span></div>';
 h+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--bd);color:var(--tm)"><span>= Unpriced Exposure</span><span style="font-family:JetBrains Mono,monospace;font-weight:700;color:var(--p)">'+n(Math.round(noPriceLbs))+'</span></div>';
-h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>Hedge</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+hedgeLots+' lots / '+n(Math.round(hedgeLbs))+' lbs</span></div>';
+if(hedgeLbs)h+='<div style="display:flex;justify-content:space-between;color:var(--tm)"><span>Hedge</span><span style="font-family:JetBrains Mono,monospace;font-weight:600">'+hedgeLots+' lots / '+n(Math.round(hedgeLbs))+' lbs</span></div>';
 h+='</div>';
 h+='<div style="border-top:1px solid var(--bd);margin:10px 0"></div>';
 h+='<div class="pg"><div class="pk"><div class="pkl">Avg Cost</div><div class="pkv">$'+flb(r.avg_cost)+'</div></div>';
@@ -642,15 +536,16 @@ if(sched&&sched.length>0){
 var unpricedSOs=new Set();
 if(pos){(pos.sales_unpriced_shipped||[]).concat(pos.sales_unpriced_unshipped||[]).forEach(function(s4){unpricedSOs.add(String(s4.order||''));});}
 h+='<div class="sh-wrap"><div class="sh-hdr">SHIP SCHEDULE</div>';
-h+='<table class="sh-tbl"><tr><th>Ship</th><th>SO</th><th>Grade</th><th>Customer</th><th>Status</th></tr>';
+h+='<table class="sh-tbl"><tr><th>Ship</th><th>SO</th><th>PO</th><th>Grade</th><th>Customer</th><th>Status</th></tr>';
 var now4=new Date();now4.setHours(0,0,0,0);
 sched.forEach(function(sh){
 var sd4=new Date(sh.ship_date+'T00:00:00');var diff4=Math.round((sd4-now4)/86400000);
 var cls4=diff4<=0?'sh-urgent':diff4<=7?'sh-soon':'';
 var isUnpriced=unpricedSOs.has(String(sh.so));
 var status4=isUnpriced?'<span style="color:var(--r)">UNPRICED</span>':'<span style="color:var(--g)">PRICED</span>';
-var dateLabel4=diff4<=0?'TODAY':diff4===1?'TOMORROW':sh.ship_date.substring(5);
-h+='<tr class="'+cls4+'"><td>'+dateLabel4+'</td><td class="sh-so">'+sh.so+'</td><td>'+sh.grade+'</td><td class="sh-cust">'+sh.customer+'</td><td>'+status4+'</td></tr>';
+var dateLabel4=diff4<0?'OVERDUE':diff4===0?'TODAY':diff4===1?'TOMORROW':sh.ship_date.substring(5);
+var po4=sh.po||'';
+h+='<tr class="'+cls4+'"><td>'+dateLabel4+'</td><td class="sh-so">'+sh.so+'</td><td class="sh-po">'+po4+'</td><td>'+sh.grade+'</td><td class="sh-cust">'+sh.customer+'</td><td>'+status4+'</td></tr>';
 });
 h+='</table></div>';}
 // soGrade/soAvail/soEffPrice/soShipBadge/soRow already declared above in classic branch via var hoisting
@@ -663,10 +558,17 @@ if(/CHOP/.test(c))return'Chops';if(/CUBB/.test(c))return'BB';if(/CU1/.test(c))re
 function soAvail(name){var ca=cav[name];if(!ca)return'';
 return ca.available?'<span class="so-avail live" title="Available '+ca.hours+'">\u25CF</span>':'<span class="so-avail off" title="Offline \u2014 hours: '+ca.hours+'">\u25CB</span>';}
 function soEffPrice(so){
-var basis=(so.basis||'COMEX'),sp=so.spread||0;
 if(so.price)return so.price;
-if(basis==='LME'&&m.lme_price_lb)return sp?m.lme_price_lb*sp:m.lme_price_lb;
-var cx=m.price||0;return sp?cx-sp:cx;}
+var ff=so.formula_factor||0,fa=so.formula_amount||0,ff2=so.formula_factor2||0,fa2=so.formula_amount2||0;
+var am=(so.against_market||'').toUpperCase();
+var base=0;
+if(am.indexOf('LME')>=0){base=m.lme_price_lb||0;}
+else if(am.indexOf('COMEX')>=0||am.indexOf('CMX')>=0){base=m.price||0;}
+else{base=m.price||0;}
+var eff=base;
+if(ff===4&&fa>0){eff=base*fa;}else if(ff===1&&fa>0){eff=base-fa;}
+if(ff2===1&&fa2>0){eff-=fa2;}else if(ff2===4&&fa2>0){eff*=fa2;}
+return eff>0?eff:base;}
 var schedBySO={};if(sched){sched.forEach(function(sh){var k=String(sh.so||'');if(k&&!schedBySO[k])schedBySO[k]=sh;});}
 var _now=new Date();_now.setHours(0,0,0,0);
 function soShipBadge(so){
@@ -674,13 +576,21 @@ var ord=String(so.order||'');
 if(so.actual_ship_date){var ad=so.actual_ship_date.substring(5);return '<span class="so-ship actual">SHIPPED '+ad+'</span>';}
 var sh=schedBySO[ord];if(!sh)return '';
 var sd=new Date(sh.ship_date+'T00:00:00');var diff=Math.round((sd-_now)/86400000);
-if(diff<=0)return '<span class="so-ship urgent">TODAY</span>';
+if(diff<0)return '<span class="so-ship urgent">OVERDUE</span>';
+if(diff===0)return '<span class="so-ship urgent">TODAY</span>';
 if(diff===1)return '<span class="so-ship soon">TOMORROW</span>';
 return '<span class="so-ship">'+sh.ship_date.substring(5)+'</span>';}
 function soRow(so,cls){
-var eff=soEffPrice(so);var priceCls=so.price?'locked':'';
 var poHtml=so.poref?'<span class="so-po" title="PO: '+so.poref+'">'+so.poref+'</span>':'';
-return '<div class="so-row '+cls+'">'+soAvail(so.consumer)+'<span class="so-cust">'+so.consumer+'</span>'+poHtml+'<span class="so-comm">'+soGrade(so.commodity)+'</span><span class="so-lbs">'+n(Math.round(so.open_lbs||so.priced_lbs||so.lbs))+'</span><span class="so-price '+priceCls+'">$'+flb(eff)+'</span><span class="so-basis '+(so.basis||'COMEX').toLowerCase()+'">'+(so.basis||'COMEX')+'</span>'+soShipBadge(so)+'</div>';}
+var priceTxt,priceCls;
+if(so.price){priceCls='locked';priceTxt='$'+flb(so.price);}
+else{priceCls='formula';var ff=so.formula_factor||0,fa=so.formula_amount||0,ff2=so.formula_factor2||0,fa2=so.formula_amount2||0,am=so.against_market||'';
+if(ff===4&&fa>0){priceTxt=parseFloat((fa*100).toFixed(2))+'%';if(ff2===1&&fa2>0)priceTxt+=' -'+fa2.toFixed(2);priceTxt+=' '+am;}
+else if(ff===1&&fa>0){priceTxt=am+' -$'+fa.toFixed(2);}
+else if(am==='TBD'){priceTxt='TBD';}
+else{priceTxt='open';}}
+var basisHtml=(priceCls==='formula'&&priceTxt!=='open')?'':'<span class="so-basis '+(so.basis||'COMEX').toLowerCase()+'">'+(so.basis||'COMEX')+'</span>';
+return '<div class="so-row '+cls+'">'+soAvail(so.consumer)+'<span class="so-cust">'+so.consumer+'</span>'+poHtml+'<span class="so-comm">'+soGrade(so.commodity)+'</span><span class="so-lbs">'+n(Math.round(so.open_lbs||so.priced_lbs||so.lbs))+'</span><span class="so-price '+priceCls+'">'+priceTxt+'</span>'+basisHtml+soShipBadge(so)+'</div>';}
 // Unified SO list with state metadata
 var pricedSOs=pos?pos.sales_priced_unshipped||[]:[];
 var allSOItems=[];
@@ -704,7 +614,8 @@ if(soGroupMode==='ship'){
 allSOItems.forEach(function(it){var k;
 if(it.actualShipDate)k='SHIPPED';
 else if(it.shipDate===undefined)k='UNSCHEDULED';
-else if(it.shipDiff<=0)k='TODAY';
+else if(it.shipDiff<0)k='OVERDUE';
+else if(it.shipDiff===0)k='TODAY';
 else if(it.shipDiff===1)k='TOMORROW';
 else if(it.shipDiff<=7)k='THIS WEEK';
 else k='LATER';
@@ -765,7 +676,7 @@ var icwRec=cfg.icw_recovery||{};var icwGr=Object.keys(icwRec);
 var icwDetail=(gradeCosts&&gradeCosts.icw_detail)||[];
 h+='<div class="so-wtd"><div class="so-wtd-hdr">GM BY GRADE <span style="font-weight:400;font-size:8px;color:var(--td);letter-spacing:0;text-transform:none;margin-left:4px">avg SO sell \u2212 cost</span></div>';
 // Column headers
-h+='<div style="display:flex;font-size:8px;color:var(--tm);padding:0 8px 3px;margin-bottom:2px"><span style="width:50px">Grade</span><span style="width:38px;text-align:right">Inv</span><span style="width:38px;text-align:right">Cost</span><span style="width:38px;text-align:right">Mkt</span><span style="width:38px;text-align:right">Sell</span><span style="width:42px;text-align:right">GM</span></div>';
+h+='<div style="display:flex;font-size:8px;color:var(--tm);padding:0 8px 3px;margin-bottom:2px"><span style="width:50px">Grade</span><span style="width:38px;text-align:right">Inv</span><span style="width:38px;text-align:right">Cost</span><span style="width:38px;text-align:right">Mkt</span><span style="width:38px;text-align:right">~Sell</span><span style="width:42px;text-align:right">GM</span></div>';
 for(var wi4b=0;wi4b<cats4.length;wi4b++){var g4=cats4[wi4b];var wd=wtd[g4];
 var sell4=wd?wd.rev/wd.lbs:null;
 var cost4=gradeCosts[g4];
@@ -846,6 +757,18 @@ h+='</div>';}
 if(mktDate4)h+='<div style="width:100%;font-size:7px;color:var(--td);text-align:right;margin-top:-2px">updated '+mktDate4+'</div>';
 h+='</div>';
 }
+// Broker Intel — paste area always visible
+h+='<div class="intel-wrap">';
+h+='<div style="font-family:JetBrains Mono,monospace;font-size:8px;color:var(--td);letter-spacing:.5px;margin-bottom:4px">BROKER INTEL <span style="font-weight:400;letter-spacing:0">— paste broker emails or headlines for analysis</span></div>';
+h+='<textarea class="intel-ta" id="intel-ta" placeholder="Paste broker commentary here...">'+(window._intelData&&window._intelData.raw?window._intelData.raw:'')+'</textarea>';
+h+='<div class="intel-btns"><button class="intel-btn intel-save" onclick="saveIntel()">SAVE & ANALYZE</button><button class="intel-btn intel-clear" onclick="clearIntel()">CLEAR</button></div>';
+if(window._intelData&&window._intelData.signals&&window._intelData.signals.length){
+h+='<div class="intel-signals">';
+window._intelData.signals.forEach(function(s2){var st=s2.short||'watch',lt=s2.long||'watch';var sti=st==='bull'?'\uD83D\uDFE2':st==='bear'?'\uD83D\uDD34':'\u26A0';var lti=lt==='bull'?'\uD83D\uDFE2':lt==='bear'?'\uD83D\uDD34':'\u26A0';h+='<div class="intel-sig" style="font-weight:600;margin-top:6px">'+s2.headline+' ['+sti+' near / '+lti+' long]</div>';h+='<div class="intel-sig" style="padding-left:12px;opacity:0.85">'+sti+' '+s2.near+'</div>';h+='<div class="intel-sig" style="padding-left:12px;opacity:0.85">'+lti+' '+s2.far+'</div>';});
+h+='</div>';
+if(window._intelData.time)h+='<div class="intel-time">Updated '+window._intelData.time+'</div>';
+}
+h+='</div>';
 h+='<div class="np5-tabs"><button class="np5-tab'+(_activeTab==='macro'?' active':'')+'" onclick="setNp5Tab(\'macro\')">MACRO</button><button class="np5-tab'+(_activeTab==='tech'?' active':'')+'" onclick="setNp5Tab(\'tech\')">TECHNICAL</button></div>';
 
 // ---- MACRO TAB ----
@@ -853,7 +776,12 @@ h+='<div class="np5-pane" id="np5-macro" style="display:'+(_activeTab==='macro'?
 // Daily Insight bullets
 var di=d.daily_insight;
 if(di&&di.bullets&&di.bullets.length){
-h+='<div style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Daily Insight</div>';
+var _diStamp='';
+if(di.generated_date){var _diD=new Date(di.generated_date+'T'+(di.generated_time||'00:00'));
+var _diDays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+var _diHr=_diD.getHours(),_diMn=_diD.getMinutes(),_diAmpm=_diHr>=12?'pm':'am';
+_diStamp=_diDays[_diD.getDay()]+' '+(_diD.getMonth()+1)+'/'+_diD.getDate()+' '+(_diHr%12||12)+':'+String(_diMn).padStart(2,'0')+_diAmpm;}
+h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:1px">Daily Insight</span>'+(_diStamp?'<span style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:600;color:var(--cu)">'+_diStamp+'</span>':'')+'</div>';
 di.bullets.forEach(function(b){
 var labelMatch=b.match(/\[(\w+)\]/);
 var label=labelMatch?labelMatch[1]:'OUTLOOK';
