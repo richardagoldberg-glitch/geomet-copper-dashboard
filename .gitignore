@@ -1,5 +1,6 @@
 .DS_Store
 .env
+.env.rom
 __pycache__/
 *.pyc
 *.pyo

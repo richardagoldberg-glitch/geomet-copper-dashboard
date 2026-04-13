@@ -5,28 +5,31 @@ Multi-timeframe charts, LME hours, fix window, warehouse (COMEX+LME),
 sales pipeline, actionable orders, Tailscale remote access
 """
 
-import json, os, csv, glob, re, time, hashlib, secrets, calendar
+import json, os, csv, glob, re, time, hashlib, secrets, calendar, threading, string, random
 from datetime import datetime, timedelta
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from http.cookies import SimpleCookie
 import socketserver
 
-# Load .env file into environment before config
-_env_path = Path(__file__).parent / ".env"
-if _env_path.exists():
-    with open(_env_path) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _k, _, _v = _line.partition("=")
-                os.environ.setdefault(_k.strip(), _v.strip())
+# Load .env files into environment before config
+for _env_name in (".env", ".env.rom"):
+    _env_path = Path(__file__).parent / _env_name
+    if _env_path.exists():
+        with open(_env_path) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _, _v = _line.partition("=")
+                    os.environ.setdefault(_k.strip(), _v.strip())
 
 DATA_DIR = Path(__file__).parent / "data"
 POSITION_CSV = DATA_DIR / "geomet_position.csv"
 SPREAD_HISTORY = DATA_DIR / "spread_history.json"
 BROKER_INTEL_FILE = DATA_DIR / "broker_intel.json"
 SHIP_SCHEDULE_FILE = DATA_DIR / "ship_schedule.json"
+DAILY_INSIGHT_FILE = DATA_DIR / "daily_insight.json"
+OPTIONS_OI_FILE = DATA_DIR / "options_oi.json"
 STATIC_DIR = Path(__file__).parent / "static"
 PORT = 8777
 
@@ -44,6 +47,12 @@ def load_config():
         "FED_FUNDS_RATE": "4.25-4.50", "FED_FUNDS_MIDPOINT": 4.375,
         "MONTHLY_FLOW": {"Chops": 171800, "BB": 162700, "#2": 106600, "#1": 82700},
         "CUSTOMER_HOURS": {},
+        "MARKET_RATES": {"BB": {"pct": 0.965, "basis": "3m"}, "#1": {"pct": 0.94, "basis": "cash"}, "#2": {"pct": 0.91, "basis": "cash"}, "Chops": {"pct": 0.94, "basis": "cash"}},
+        "MARKET_RATES_LME_AT_UPDATE": 0,
+        "MARKET_RATES_DATE": "",
+        "MARKET_RATES_STALE_THRESHOLD": 0.05,
+        "ICW_RECOVERY": {},
+        "CUSTOM_LEVELS": [],
     }
     if cfg_path.exists():
         try:
@@ -64,41 +73,176 @@ MT_TO_LB = 2204.62
 # LME CACHE — 30 min cache + market hours only
 # ---------------------------------------------------------------------------
 _lme_cache = {"price_mt": None, "price_lb": None, "timestamp": 0, "source": "none"}
+_insight_cache = {"data": None, "timestamp": 0}
+LME_PRICE_FILE = DATA_DIR / "lme_last_price.json"
+VOL_SNAPSHOT_FILE = DATA_DIR / "volume_snapshots.json"
+
+def _is_lme_open():
+    """Check if LME is currently open using London time."""
+    import zoneinfo
+    try:
+        london = zoneinfo.ZoneInfo("Europe/London")
+    except Exception:
+        from datetime import timezone
+        london = timezone.utc
+    now_london = datetime.now(london)
+    wd = now_london.weekday()
+    t = now_london.hour * 60 + now_london.minute
+    if wd >= 5:
+        return False
+    # LME Select: 01:00 (60) - 19:00 (1140) London
+    return 60 <= t < 1140
+
+
+# ---------------------------------------------------------------------------
+# VOLUME SNAPSHOTS — parallel time-of-week comparison
+# ---------------------------------------------------------------------------
+def _record_volume_snapshot(volume):
+    """Record current session volume with dow/hour for parallel comparison."""
+    if not volume or volume <= 0:
+        return
+    now = datetime.now()
+    dow = now.weekday()       # 0=Mon … 6=Sun
+    hour = now.hour
+    date_str = now.strftime("%Y-%m-%d")
+    key = f"{date_str}-{hour}"
+    try:
+        snapshots = json.load(open(VOL_SNAPSHOT_FILE)) if VOL_SNAPSHOT_FILE.exists() else []
+    except Exception:
+        snapshots = []
+    found = False
+    for s in snapshots:
+        if s.get("key") == key:
+            s["vol"] = int(volume)
+            found = True
+            break
+    if not found:
+        snapshots.append({"key": key, "dow": dow, "hour": hour, "vol": int(volume), "date": date_str})
+    # Keep last 8 weeks
+    cutoff = (now - timedelta(days=56)).strftime("%Y-%m-%d")
+    snapshots = [s for s in snapshots if s["date"] >= cutoff]
+    try:
+        with open(VOL_SNAPSHOT_FILE, "w") as f:
+            json.dump(snapshots, f)
+    except Exception:
+        pass
+
+
+def _get_parallel_avg_volume():
+    """Average volume at this same day-of-week + hour from history."""
+    now = datetime.now()
+    dow = now.weekday()
+    hour = now.hour
+    today = now.strftime("%Y-%m-%d")
+    try:
+        snapshots = json.load(open(VOL_SNAPSHOT_FILE)) if VOL_SNAPSHOT_FILE.exists() else []
+    except Exception:
+        return None
+    matching = [s["vol"] for s in snapshots
+                if s["dow"] == dow and s["hour"] == hour and s["date"] != today]
+    if len(matching) < 2:
+        return None
+    return int(sum(matching) / len(matching))
+
 
 def fetch_lme_price():
     global _lme_cache
     now = time.time()
-    _now = datetime.now()
-    _hour = _now.hour; _wd = _now.weekday()
-    _lme_open = (
-        (_wd == 6 and _hour >= 19) or
-        (_wd in (0, 1, 2, 3)) or
-        (_wd == 4 and _hour < 13)
-    )
-    if not _lme_open and _lme_cache["price_lb"]:
-        return _lme_cache
-    if _lme_cache["price_lb"] and (now - _lme_cache["timestamp"]) < 1800:
+    lme_open = _is_lme_open()
+
+    # When LME is closed, use cached/persisted price
+    if not lme_open:
+        if _lme_cache["price_lb"]:
+            return _lme_cache
+        if LME_PRICE_FILE.exists():
+            try:
+                with open(LME_PRICE_FILE) as f:
+                    saved = json.load(f)
+                pm = saved.get("price_mt") or saved.get("official_mt")
+                if pm:
+                    pl = round(pm / MT_TO_LB, 4)
+                    _lme_cache = {"price_mt": pm, "price_lb": pl,
+                                  "timestamp": now, "source": "cached"}
+                    print(f"[INFO] LME closed — using last known price ${pm}/MT from file")
+                    return _lme_cache
+            except Exception:
+                pass
+        return {"price_mt": None, "price_lb": None, "timestamp": now, "source": "none"}
+
+    # --- Priority 1: Live WebSocket (CAPITALCOM:MCU3) ---
+    with _tv_lock:
+        live_mt = _tv_state_lme["price_mt"]
+        live_ts = _tv_state_lme["timestamp"]
+        live_ch = _tv_state_lme["change_mt"]
+        live_chp = _tv_state_lme["change_pct"]
+    if live_mt is not None and (now - live_ts) < 300:
+        price_lb = round(live_mt / MT_TO_LB, 4)
+        change_lb = round(live_ch / MT_TO_LB, 4) if live_ch is not None else None
+        _lme_cache = {"price_mt": live_mt, "price_lb": price_lb,
+                      "timestamp": now, "source": "live",
+                      "change_lb": change_lb, "change_pct": live_chp}
+        try:
+            with open(LME_PRICE_FILE, "w") as f:
+                json.dump({"price_mt": live_mt, "price_lb": price_lb, "official_mt": live_mt}, f)
+        except Exception:
+            pass
         return _lme_cache
 
+    # --- Priority 2+3: Projected / Official via metals.dev API ---
+    # Use cache if fresh (5 min for projected, 30 min for API)
+    cache_ttl = 300 if _lme_cache.get("source") == "projected" else 1800
+    if _lme_cache["price_lb"] and (now - _lme_cache["timestamp"]) < cache_ttl:
+        return _lme_cache
+
+    lme_official_mt = None
     api_key = CFG["METALS_DEV_API_KEY"]
     if api_key:
         try:
             import urllib.request
-            url = f"https://api.metals.dev/v1/metal/spot?api_key={api_key}&metal=copper&currency=USD"
+            url = f"https://api.metals.dev/v1/latest?api_key={api_key}&currency=USD&unit=mt"
             req = urllib.request.Request(url, headers={"User-Agent": "GeometDashboard/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
-                if "rate" in data:
-                    rate = data["rate"]
-                    price_mt = rate["price"] if isinstance(rate, dict) else rate
-                    price_lb = round(price_mt / MT_TO_LB, 4)
-                    # metals.dev /v1/metal/spot returns ~LME 3M (confirmed vs CQG LDKZA)
-                    _lme_cache = {"price_mt": round(price_mt, 2), "price_lb": price_lb,
-                                  "timestamp": now, "source": "metals.dev"}
-                    return _lme_cache
+                if data.get("status") == "success" and "metals" in data:
+                    lme_official_mt = data["metals"].get("lme_copper")
         except Exception as e:
             print(f"[WARN] metals.dev API error: {e}")
 
+    # Fallback: recover official from saved file
+    if not lme_official_mt and LME_PRICE_FILE.exists():
+        try:
+            with open(LME_PRICE_FILE) as f:
+                saved = json.load(f)
+            lme_official_mt = saved.get("official_mt") or saved.get("price_mt")
+        except Exception:
+            pass
+
+    if lme_official_mt:
+        # Project live LME 3M by applying COMEX intraday % change
+        price_mt = lme_official_mt
+        source = "lme_official"
+        with _tv_lock:
+            comex_live = _tv_state["price"]
+            comex_prev = _tv_state["prev_close"]
+        if comex_live and comex_prev and comex_prev > 0:
+            factor = comex_live / comex_prev
+            price_mt = round(lme_official_mt * factor, 2)
+            source = "projected"
+            print(f"[INFO] LME 3M projected: ${lme_official_mt} official × {factor:.4f} COMEX factor = ${price_mt}/MT")
+        else:
+            print(f"[INFO] LME 3M using official settlement: ${price_mt}/MT (no COMEX data for projection)")
+
+        price_lb = round(price_mt / MT_TO_LB, 4)
+        _lme_cache = {"price_mt": price_mt, "price_lb": price_lb,
+                      "timestamp": now, "source": source}
+        try:
+            with open(LME_PRICE_FILE, "w") as f:
+                json.dump({"price_mt": price_mt, "price_lb": price_lb, "official_mt": lme_official_mt}, f)
+        except Exception:
+            pass
+        return _lme_cache
+
+    # --- Priority 4: Manual config ---
     manual = CFG["LME_MANUAL_USD_MT"]
     if manual and manual > 0:
         price_lb = round(manual / MT_TO_LB, 4)
@@ -108,18 +252,268 @@ def fetch_lme_price():
 
 
 # ---------------------------------------------------------------------------
-# REAL-TIME PRICE — investing.com API + yfinance intraday fallback
+# TRADINGVIEW WEBSOCKET — near-real-time COMEX copper
+# ---------------------------------------------------------------------------
+_tv_state = {
+    "price": None, "prev_close": None, "open": None,
+    "high": None, "low": None, "volume": None,
+    "change": None, "change_pct": None,
+    "timestamp": 0, "connected": False,
+}
+_tv_state_2 = {
+    "price": None, "prev_close": None,
+    "change": None, "change_pct": None,
+    "timestamp": 0,
+}
+_tv_state_lme = {
+    "price_mt": None, "prev_close_mt": None,
+    "change_mt": None, "change_pct": None,
+    "timestamp": 0,
+}
+_tv_lock = threading.Lock()
+
+
+def _tv_frame(msg):
+    """Wrap a message in TradingView's ~m~LENGTH~m~ framing."""
+    return f"~m~{len(msg)}~m~{msg}"
+
+
+def _tv_send(ws, msg):
+    """Send a framed JSON message."""
+    ws.send(_tv_frame(json.dumps(msg)))
+
+
+def _tv_parse_frames(raw):
+    """Parse one or more ~m~LENGTH~m~PAYLOAD frames from raw data."""
+    frames = []
+    i = 0
+    while i < len(raw):
+        if not raw[i:].startswith("~m~"):
+            break
+        i += 3
+        j = raw.index("~m~", i)
+        length = int(raw[i:j])
+        j += 3
+        frames.append(raw[j:j + length])
+        i = j + length
+    return frames
+
+
+def _tv_worker():
+    """Background thread: maintain TradingView WebSocket for COMEX:HG1! quotes."""
+    global _tv_state
+    try:
+        import websocket
+    except ImportError:
+        print("[WARN] websocket-client not installed — TradingView feed disabled")
+        return
+
+    while True:
+        session_id = "qs_" + "".join(random.choices(string.ascii_lowercase + string.digits, k=12))
+        try:
+            ws = websocket.create_connection(
+                "wss://data.tradingview.com/socket.io/websocket",
+                header={"Origin": "https://www.tradingview.com"},
+                timeout=60,
+            )
+            print(f"[INFO] TradingView WebSocket connected (session {session_id})")
+
+            # Auth + subscribe
+            _tv_send(ws, {"m": "set_auth_token", "p": ["unauthorized_user_token"]})
+            _tv_send(ws, {"m": "quote_create_session", "p": [session_id]})
+            _tv_send(ws, {"m": "quote_set_fields", "p": [
+                session_id,
+                "lp", "ch", "chp", "open_price", "high_price", "low_price",
+                "prev_close_price", "volume", "description", "short_name",
+            ]})
+            _tv_send(ws, {"m": "quote_add_symbols", "p": [session_id, "COMEX:HG1!"]})
+            _tv_send(ws, {"m": "quote_add_symbols", "p": [session_id, "COMEX:HG2!"]})
+            _tv_send(ws, {"m": "quote_add_symbols", "p": [session_id, "CAPITALCOM:MCU3"]})
+
+            with _tv_lock:
+                _tv_state["connected"] = True
+
+            while True:
+                try:
+                    raw = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    # No data for 60s — send a ping to keep alive
+                    try:
+                        ws.ping()
+                    except Exception:
+                        break
+                    continue
+                if not raw:
+                    break
+                frames = _tv_parse_frames(raw)
+                for frame in frames:
+                    # Heartbeat
+                    if frame.startswith("~h~"):
+                        ws.send(_tv_frame(frame))
+                        continue
+                    # Data
+                    try:
+                        msg = json.loads(frame)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if msg.get("m") == "qsd":
+                        p_data = msg.get("p", [None, {}])
+                        sym = p_data[1].get("n", "") if len(p_data) > 1 else ""
+                        vals = p_data[1].get("v", {}) if len(p_data) > 1 else {}
+                        lp = vals.get("lp")
+                        if lp is not None and "MCU3" in sym:
+                            # LME 3M copper (CAPITALCOM:MCU3) — $/MT
+                            with _tv_lock:
+                                _tv_state_lme["price_mt"] = round(float(lp), 2)
+                                _tv_state_lme["timestamp"] = time.time()
+                                if "ch" in vals:
+                                    _tv_state_lme["change_mt"] = round(float(vals["ch"]), 2)
+                                if "chp" in vals:
+                                    _tv_state_lme["change_pct"] = round(float(vals["chp"]), 2)
+                                if "prev_close_price" in vals:
+                                    _tv_state_lme["prev_close_mt"] = round(float(vals["prev_close_price"]), 2)
+                            if not hasattr(_tv_worker, '_lme_log_ts') or time.time() - _tv_worker._lme_log_ts > 300:
+                                print(f"[INFO] LME 3M live: ${_tv_state_lme['price_mt']}/MT via MCU3")
+                                _tv_worker._lme_log_ts = time.time()
+                        elif lp is not None and "HG2" in sym:
+                            # Next month contract (HG2!)
+                            with _tv_lock:
+                                _tv_state_2["price"] = round(float(lp), 4)
+                                _tv_state_2["timestamp"] = time.time()
+                                if "ch" in vals:
+                                    _tv_state_2["change"] = round(float(vals["ch"]), 4)
+                                if "chp" in vals:
+                                    _tv_state_2["change_pct"] = round(float(vals["chp"]), 2)
+                                if "prev_close_price" in vals:
+                                    _tv_state_2["prev_close"] = round(float(vals["prev_close_price"]), 4)
+                        elif lp is not None:
+                            # Front month contract (HG1!)
+                            with _tv_lock:
+                                _tv_state["price"] = round(float(lp), 4)
+                                _tv_state["timestamp"] = time.time()
+                                if "ch" in vals:
+                                    _tv_state["change"] = round(float(vals["ch"]), 4)
+                                if "chp" in vals:
+                                    _tv_state["change_pct"] = round(float(vals["chp"]), 2)
+                                if "prev_close_price" in vals:
+                                    _tv_state["prev_close"] = round(float(vals["prev_close_price"]), 4)
+                                if "open_price" in vals:
+                                    _tv_state["open"] = round(float(vals["open_price"]), 4)
+                                if "high_price" in vals:
+                                    _tv_state["high"] = round(float(vals["high_price"]), 4)
+                                if "low_price" in vals:
+                                    _tv_state["low"] = round(float(vals["low_price"]), 4)
+                                if "volume" in vals:
+                                    _tv_state["volume"] = vals["volume"]
+
+        except Exception as e:
+            print(f"[WARN] TradingView WebSocket error: {e}")
+            with _tv_lock:
+                _tv_state["connected"] = False
+        # Reconnect after 5 seconds
+        time.sleep(5)
+
+
+# Start TradingView WebSocket in background daemon thread
+_tv_thread = threading.Thread(target=_tv_worker, daemon=True, name="tv-ws")
+_tv_thread.start()
+
+
+# ---------------------------------------------------------------------------
+# REAL-TIME PRICE — TradingView WebSocket primary, yfinance fallback
 # ---------------------------------------------------------------------------
 _rt_cache = {"price": None, "prev_close": None, "timestamp": 0, "source": None}
 _prev_settle_cache = {}  # keyed by ticker: {"price": ..., "timestamp": ...}
 
+def _is_new_comex_session():
+    """Check if we're in the new COMEX session (after 5PM CT daily break).
+    COMEX sessions run 5PM CT to 4PM CT next day, with a 4-5PM CT break.
+    After 5PM CT Mon-Thu, the new session has started and today's close
+    becomes the previous settlement, not yesterday's."""
+    import zoneinfo
+    try:
+        chicago = zoneinfo.ZoneInfo("America/Chicago")
+    except Exception:
+        from datetime import timezone, timedelta as td
+        chicago = timezone(td(hours=-6))
+    now_ct = datetime.now(chicago)
+    wd = now_ct.weekday()  # 0=Mon
+    t = now_ct.hour * 60 + now_ct.minute
+    # After 5PM CT (1020 min) Mon-Thu = new session has started
+    # Sunday 5PM+ also starts the week's first session
+    if wd <= 3 and t >= 1020:
+        return True
+    if wd == 6 and t >= 1020:  # Sunday evening open
+        return True
+    return False
+
+
+_session_settle_cache = {"price": None, "date": None, "ticker": None}
+
+def _fetch_session_settle(ticker="HG=F"):
+    """Get today's 4PM CT settlement from intraday data.
+    After the 4-5PM CT break, the last bar before 4PM = the settlement."""
+    global _session_settle_cache
+    import zoneinfo
+    try:
+        chicago = zoneinfo.ZoneInfo("America/Chicago")
+    except Exception:
+        from datetime import timezone, timedelta as td
+        chicago = timezone(td(hours=-6))
+    today_ct = datetime.now(chicago).date()
+    # Return cached if we already found today's settlement
+    if _session_settle_cache["price"] and _session_settle_cache["date"] == str(today_ct) \
+       and _session_settle_cache["ticker"] == ticker:
+        return _session_settle_cache["price"]
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        h = t.history(period="2d", interval="5m")
+        if h.empty:
+            return None
+        h = h.reset_index()
+        h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+        settle = None
+        for _, row in h.iterrows():
+            ts = row.get("Datetime", row.get("Date"))
+            if not hasattr(ts, 'astimezone'):
+                continue
+            ts_ct = ts.astimezone(chicago)
+            if ts_ct.date() == today_ct:
+                ct_min = ts_ct.hour * 60 + ts_ct.minute
+                # 5-min bars before 4PM CT (960 min) — last one is the settlement
+                if ct_min < 960:
+                    settle = round(float(row["Close"]), 4)
+        if settle:
+            _session_settle_cache = {"price": settle, "date": str(today_ct), "ticker": ticker}
+            print(f"[INFO] Session settle {ticker} from intraday: ${settle:.4f}")
+        return settle
+    except Exception as e:
+        print(f"[WARN] Session settle fetch error: {e}")
+    return None
+
+
 def _fetch_prev_settle_yf(ticker="HG=F"):
-    """Get previous session's settlement from yfinance daily data (5-min cache per ticker)."""
+    """Get previous session's settlement from yfinance (5-min cache per ticker).
+    After 5PM CT (new COMEX session), gets today's 4PM settlement from intraday
+    data, since the daily bar close keeps updating with live prices."""
     global _prev_settle_cache
     now = time.time()
+    new_session = _is_new_comex_session()
     cached = _prev_settle_cache.get(ticker, {})
-    if cached.get("price") and (now - cached.get("timestamp", 0)) < 300:
+    # Invalidate cache if session state changed (crossed 5PM CT boundary)
+    if cached.get("price") and (now - cached.get("timestamp", 0)) < 300 \
+       and cached.get("new_session") == new_session:
         return cached["price"]
+
+    # After 5PM CT: get today's 4PM settlement from intraday bars
+    if new_session:
+        settle = _fetch_session_settle(ticker)
+        if settle:
+            _prev_settle_cache[ticker] = {"price": settle, "timestamp": now, "new_session": new_session}
+            return settle
+        # Fall through to daily data if intraday failed
+
     try:
         import yfinance as yf
         t = yf.Ticker(ticker)
@@ -139,7 +533,7 @@ def _fetch_prev_settle_yf(ticker="HG=F"):
             else:
                 prev = round(float(hd.iloc[-1]["Close"]), 4)
                 print(f"[INFO] Prev settle {ticker} (no today): ${prev:.4f} from {hd.iloc[-1]['Date']}")
-            _prev_settle_cache[ticker] = {"price": prev, "timestamp": now}
+            _prev_settle_cache[ticker] = {"price": prev, "timestamp": now, "new_session": new_session}
             return prev
     except Exception as e:
         print(f"[WARN] Prev settle fetch error ({ticker}): {e}")
@@ -195,20 +589,33 @@ def _get_active_yf_ticker():
 
 
 def _fetch_realtime_price():
-    """Get most current COMEX copper price (1-min cache).
-    Shows the most liquid contract: front month normally, next month near FND.
-    Also tries investing.com first (real-time) before yfinance (5-min delayed).
+    """Get most current COMEX copper price.
+    Priority: TradingView WebSocket (near-real-time) → yfinance (15-30 min delayed).
     Returns dict with price, prev_close, source, and active_contract.
     """
     global _rt_cache
     now = time.time()
-    if _rt_cache["price"] and (now - _rt_cache["timestamp"]) < 60:
+
+    # Method 1: TradingView WebSocket (near-real-time, front month continuous)
+    with _tv_lock:
+        tv_price = _tv_state["price"]
+        tv_age = now - _tv_state["timestamp"] if _tv_state["timestamp"] else 999
+        tv_prev = _tv_state["prev_close"]
+        tv_change = _tv_state["change"]
+        tv_change_pct = _tv_state["change_pct"]
+
+    if tv_price and tv_age < 120:  # Accept if data is < 2 min old
+        _rt_cache = {"price": tv_price, "prev_close": tv_prev,
+                     "change": tv_change, "change_pct": tv_change_pct,
+                     "timestamp": now, "source": "tradingview",
+                     "active_contract": "front"}
         return _rt_cache
 
-    # Determine which contract to show based on FND proximity
-    active_ticker, active_contract = _get_active_yf_ticker()
+    # Method 2: yfinance fallback (15-30 min delayed, 1-min cache)
+    if _rt_cache["price"] and (now - _rt_cache["timestamp"]) < 60 and _rt_cache["source"] == "yfinance":
+        return _rt_cache
 
-    # yfinance intraday — use the active contract
+    active_ticker, active_contract = _get_active_yf_ticker()
     try:
         import yfinance as yf
         t = yf.Ticker(active_ticker)
@@ -448,12 +855,37 @@ def fetch_fed_data():
 _cot_cache = {"data": None, "timestamp": 0}
 
 def fetch_cot_data():
-    """Fetch CFTC Commitment of Traders data for COMEX copper. 4h cache.
+    """Fetch CFTC Commitment of Traders data for COMEX copper.
     Uses disaggregated futures-only report via Socrata API (free, no auth).
+    Cache: 4h normally, but force-refresh on Fridays after 3:30 PM ET if we
+    don't yet have the current week's report (CFTC publishes ~3:30 PM ET Fri).
     """
     global _cot_cache
     now = time.time()
+    cache_valid = False
     if _cot_cache["data"] and (now - _cot_cache["timestamp"]) < 14400:
+        # Check if it's Friday after 3:30 PM ET and we might have a new report
+        from datetime import timezone, timedelta
+        import zoneinfo
+        try:
+            et = zoneinfo.ZoneInfo("America/New_York")
+        except Exception:
+            et = timezone(timedelta(hours=-4))
+        now_et = datetime.now(et)
+        if now_et.weekday() == 4 and (now_et.hour > 15 or (now_et.hour == 15 and now_et.minute >= 30)):
+            # It's Friday after 3:30 PM ET — check if cached report is current week
+            # Current week's report date = most recent Tuesday
+            days_since_tue = (now_et.weekday() - 1) % 7  # Fri=4, Tue=1 → 3
+            this_tuesday = (now_et - timedelta(days=days_since_tue)).strftime("%Y-%m-%d")
+            cached_date = _cot_cache["data"].get("report_date", "")
+            if cached_date < this_tuesday:
+                print(f"[INFO] COT: Friday refresh — cached {cached_date}, expecting {this_tuesday}")
+                cache_valid = False
+            else:
+                cache_valid = True
+        else:
+            cache_valid = True
+    if cache_valid:
         return _cot_cache["data"]
     try:
         import urllib.request, urllib.parse
@@ -541,6 +973,10 @@ def fetch_cot_data():
         elif mm_pct_52w < 45 and mm_weekly_change > 5000:
             insight = "Funds covering shorts \u2014 buying pressure building"
 
+        # Flag staleness: report > 9 days old means we missed a week
+        days_old = (datetime.now() - datetime.strptime(report_date, "%Y-%m-%d")).days if report_date else 99
+        stale = days_old > 9
+
         result = {
             "mm_net": mm_net, "mm_long": mm_long, "mm_short": mm_short,
             "mm_weekly_change": mm_weekly_change,
@@ -549,6 +985,7 @@ def fetch_cot_data():
             "prod_net": prod_net, "swap_net": swap_net,
             "report_date": report_date, "oi_at_report": oi_at_report,
             "traders_long": traders_long, "traders_short": traders_short,
+            "stale": stale, "days_old": days_old,
         }
         _cot_cache = {"data": result, "timestamp": now}
         print(f"[INFO] COT: MM net {mm_net:+,} ({crowding}, {mm_pct_52w}th pctl) as of {report_date}")
@@ -556,6 +993,334 @@ def fetch_cot_data():
     except Exception as e:
         print(f"[WARN] COT fetch error: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# CME COPPER OPTIONS OPEN INTEREST (daily bulletin PDF)
+# ---------------------------------------------------------------------------
+_options_oi_cache = {"data": None, "timestamp": 0}
+OPTIONS_OI_CACHE_TTL = 43200  # 12 hours
+
+
+def _oi_parse_int(s):
+    """Parse integer from CME PDF field, handling commas."""
+    try:
+        return int(s.replace(",", "").strip())
+    except Exception:
+        return None
+
+
+def _parse_cme_options_pdf():
+    """Download and parse CME daily bulletin PDF for copper options OI.
+    Returns dict with calls/puts per strike for the front month (highest OI)."""
+    try:
+        import pdfplumber
+    except ImportError:
+        print("[WARN] pdfplumber not installed — skipping options OI")
+        return None
+
+    import urllib.request
+    import io
+    import re
+
+    url = "https://www.cmegroup.com/daily_bulletin/current/Section64_Metals_Option_Products.pdf"
+    try:
+        import subprocess
+        result = subprocess.run([
+            "curl", "-s", "-L", "--compressed", "--max-time", "45",
+            "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "-H", "Accept-Language: en-US,en;q=0.9",
+            "-H", "Sec-Fetch-Dest: document",
+            "-H", "Sec-Fetch-Mode: navigate",
+            "-H", "Sec-Fetch-Site: none",
+            "-H", "Sec-Fetch-User: ?1",
+            url
+        ], capture_output=True, timeout=60)
+        pdf_bytes = result.stdout
+        if not pdf_bytes or len(pdf_bytes) < 10000:
+            print(f"[WARN] Options OI PDF download failed: got {len(pdf_bytes)} bytes")
+            return None
+    except Exception as e:
+        print(f"[WARN] Options OI PDF download failed: {e}")
+        return None
+
+    # Regex: data line starts with 3-4 digit strike, ends with OI + change/UNCH
+    # strike ... OI +/- change  OR  strike ... OI UNCH
+    oi_line_re = re.compile(
+        r'^\s*(\d{3,4})\s+'        # strike in cents
+        r'.*\s'                     # middle (prices, ranges, etc.)
+        r'(\d{1,6})\s+'            # open interest
+        r'([+-]\s*\d+|UNCH)\s*$'   # change or UNCH
+    )
+    # Settlement + delta pattern in middle of line:
+    # settlement [+/-/NEW] pt_change delta
+    settle_re = re.compile(
+        r'\s([\d.]+)\s+'           # settlement price
+        r'([+-]\s*[\d.]+|NEW|UNCH)\s+'  # point change
+        r'([.\d]{4,6})\s'          # delta (.XXXX)
+    )
+
+    calls = {}  # {month: {strike_cents: {"oi": int, "settle": float, "delta": float}}}
+    puts = {}
+    bulletin_date = ""
+
+    try:
+        pdf = pdfplumber.open(io.BytesIO(pdf_bytes))
+    except Exception as e:
+        print(f"[WARN] Options OI PDF parse error: {e}")
+        return None
+
+    in_hx_call = False
+    in_hx_put = False
+    current_month = None
+
+    for page in pdf.pages:
+        text = page.extract_text()
+        if not text:
+            continue
+
+        # Extract bulletin date from header
+        if not bulletin_date:
+            dm = re.search(r'BULLETIN\s+#\s*\d+@?\s+.*?\s+((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+\w+\s+\d+,\s+\d{4})', text)
+            if dm:
+                bulletin_date = dm.group(1)
+
+        lines = text.split("\n")
+        for line in lines:
+            stripped = line.strip()
+            upper = stripped.upper()
+
+            # Detect section headers
+            if "HX CALL" in upper and "COMEX COPPER" in upper:
+                in_hx_call = True
+                in_hx_put = False
+                current_month = None
+                continue
+            if "HX PUT" in upper and "COMEX COPPER" in upper:
+                in_hx_put = True
+                in_hx_call = False
+                current_month = None
+                continue
+
+            # End of HX sections: next product (HXE, gold, silver, etc.)
+            if (in_hx_call or in_hx_put) and re.match(r'^(HXE|HWR|HWT|HWW|OG|SO|SI)\s', upper):
+                in_hx_call = False
+                in_hx_put = False
+                current_month = None
+                continue
+
+            if not in_hx_call and not in_hx_put:
+                continue
+
+            # Month header (e.g. APR26, MAY26)
+            month_m = re.match(r'^([A-Z]{3}\d{2})\s*$', stripped)
+            if month_m:
+                current_month = month_m.group(1)
+                continue
+
+            # TOTAL line — skip
+            if stripped.startswith("TOTAL"):
+                continue
+
+            if not current_month:
+                continue
+
+            # Parse data line
+            m = oi_line_re.match(stripped)
+            if not m:
+                continue
+
+            strike_cents = int(m.group(1))
+            oi = _oi_parse_int(m.group(2))
+            if oi is None or oi == 0:
+                continue
+
+            # Extract settlement and delta
+            settle = None
+            delta = None
+            sm = settle_re.search(stripped)
+            if sm:
+                try:
+                    settle = float(sm.group(1))
+                except Exception:
+                    pass
+                try:
+                    delta = float(sm.group(3))
+                except Exception:
+                    pass
+
+            target = calls if in_hx_call else puts
+            if current_month not in target:
+                target[current_month] = {}
+
+            # Aggregate OI at same strike (some strikes appear multiple times)
+            if strike_cents in target[current_month]:
+                target[current_month][strike_cents]["oi"] += oi
+            else:
+                target[current_month][strike_cents] = {
+                    "oi": oi, "settle": settle, "delta": delta
+                }
+
+    pdf.close()
+
+    if not calls and not puts:
+        print("[WARN] Options OI: no HX data found in PDF")
+        return None
+
+    # Identify front month by highest total OI across calls+puts
+    month_oi = {}
+    for month, strikes in calls.items():
+        month_oi[month] = month_oi.get(month, 0) + sum(s["oi"] for s in strikes.values())
+    for month, strikes in puts.items():
+        month_oi[month] = month_oi.get(month, 0) + sum(s["oi"] for s in strikes.values())
+
+    if not month_oi:
+        return None
+
+    front_month = max(month_oi, key=month_oi.get)
+    fm_calls = calls.get(front_month, {})
+    fm_puts = puts.get(front_month, {})
+
+    # --- Analytics ---
+
+    # Max pain first (needed to anchor near-money filter)
+    all_strikes = sorted(set(list(fm_calls.keys()) + list(fm_puts.keys())))
+    max_pain = None
+    if all_strikes:
+        min_pain_cost = float("inf")
+        for test_strike in all_strikes:
+            total_cost = 0
+            for cs, cd in fm_calls.items():
+                if test_strike >= cs:
+                    total_cost += cd["oi"] * (test_strike - cs)
+            for ps, pd in fm_puts.items():
+                if test_strike <= ps:
+                    total_cost += pd["oi"] * (ps - test_strike)
+            if total_cost < min_pain_cost:
+                min_pain_cost = total_cost
+                max_pain = {"strike": test_strike / 100.0, "strike_cents": test_strike}
+
+    # Near-money filter: ±20% of max pain (or median strike if no max pain)
+    anchor = max_pain["strike_cents"] if max_pain else (all_strikes[len(all_strikes)//2] if all_strikes else 550)
+    near_lo = int(anchor * 0.80)
+    near_hi = int(anchor * 1.20)
+
+    # Put wall: highest put OI at or below anchor, within near-money range
+    put_wall = None
+    if fm_puts:
+        near_puts = {k: v for k, v in fm_puts.items() if near_lo <= k <= anchor}
+        if near_puts:
+            pw_strike = max(near_puts, key=lambda k: near_puts[k]["oi"])
+            put_wall = {"strike": pw_strike / 100.0, "oi": near_puts[pw_strike]["oi"],
+                         "strike_cents": pw_strike}
+
+    # Call wall: highest call OI at or above anchor, within near-money range
+    call_wall = None
+    if fm_calls:
+        near_calls = {k: v for k, v in fm_calls.items() if anchor <= k <= near_hi}
+        if near_calls:
+            cw_strike = max(near_calls, key=lambda k: near_calls[k]["oi"])
+            call_wall = {"strike": cw_strike / 100.0, "oi": near_calls[cw_strike]["oi"],
+                          "strike_cents": cw_strike}
+
+    # P/C ratio (near-money only for meaningful signal)
+    nm_put_oi = sum(v["oi"] for k, v in fm_puts.items() if near_lo <= k <= near_hi)
+    nm_call_oi = sum(v["oi"] for k, v in fm_calls.items() if near_lo <= k <= near_hi)
+    total_put_oi = sum(s["oi"] for s in fm_puts.values())
+    total_call_oi = sum(s["oi"] for s in fm_calls.values())
+    pc_ratio = round(nm_put_oi / nm_call_oi, 2) if nm_call_oi > 0 else None
+
+    # Top 10 strikes by combined OI (near-money only)
+    combined = {}
+    for s, d in fm_calls.items():
+        if s < near_lo or s > near_hi:
+            continue
+        combined[s] = combined.get(s, {"call_oi": 0, "put_oi": 0})
+        combined[s]["call_oi"] += d["oi"]
+    for s, d in fm_puts.items():
+        if s < near_lo or s > near_hi:
+            continue
+        combined[s] = combined.get(s, {"call_oi": 0, "put_oi": 0})
+        combined[s]["put_oi"] += d["oi"]
+
+    top10 = sorted(combined.items(), key=lambda x: x[1]["call_oi"] + x[1]["put_oi"], reverse=True)[:10]
+    top10_list = [{"strike": s / 100.0, "call_oi": d["call_oi"], "put_oi": d["put_oi"],
+                   "total_oi": d["call_oi"] + d["put_oi"]} for s, d in top10]
+    # Sort by strike for display
+    top10_list.sort(key=lambda x: x["strike"])
+
+    # All near-money strikes bucketed to 10¢ increments for zoomed chart
+    buckets = {}
+    for s, d in fm_calls.items():
+        if s < near_lo or s > near_hi:
+            continue
+        bucket = (s // 10) * 10  # round down to nearest 10¢
+        buckets[bucket] = buckets.get(bucket, {"call_oi": 0, "put_oi": 0})
+        buckets[bucket]["call_oi"] += d["oi"]
+    for s, d in fm_puts.items():
+        if s < near_lo or s > near_hi:
+            continue
+        bucket = (s // 10) * 10
+        buckets[bucket] = buckets.get(bucket, {"call_oi": 0, "put_oi": 0})
+        buckets[bucket]["put_oi"] += d["oi"]
+    all_buckets = [{"strike": b / 100.0, "call_oi": d["call_oi"], "put_oi": d["put_oi"],
+                    "total_oi": d["call_oi"] + d["put_oi"]}
+                   for b, d in sorted(buckets.items())]
+
+    result = {
+        "front_month": front_month,
+        "bulletin_date": bulletin_date,
+        "put_wall": put_wall,
+        "call_wall": call_wall,
+        "max_pain": max_pain,
+        "pc_ratio": pc_ratio,
+        "total_put_oi": total_put_oi,
+        "total_call_oi": total_call_oi,
+        "top10": top10_list,
+        "buckets": all_buckets,
+    }
+
+    if put_wall and call_wall and max_pain:
+        print(f"[INFO] Options OI parsed: {front_month} — put wall ${put_wall['strike']:.2f} "
+              f"({put_wall['oi']:,} contracts) / call wall ${call_wall['strike']:.2f} "
+              f"({call_wall['oi']:,} contracts) / max pain ${max_pain['strike']:.2f}")
+    return result
+
+
+def fetch_options_oi():
+    """Fetch CME copper options OI with 12h memory cache → 36h file cache → PDF parse."""
+    global _options_oi_cache
+    now = time.time()
+
+    # Memory cache (12h)
+    if _options_oi_cache["data"] and (now - _options_oi_cache["timestamp"]) < OPTIONS_OI_CACHE_TTL:
+        return _options_oi_cache["data"]
+
+    # File cache (36h)
+    if OPTIONS_OI_FILE.exists():
+        try:
+            age = now - OPTIONS_OI_FILE.stat().st_mtime
+            if age < 129600:  # 36 hours
+                with open(OPTIONS_OI_FILE) as f:
+                    data = json.load(f)
+                if data:
+                    _options_oi_cache = {"data": data, "timestamp": now}
+                    print(f"[INFO] Options OI loaded from file cache ({age / 3600:.0f}h old)")
+                    return data
+        except Exception:
+            pass
+
+    # Fresh parse
+    result = _parse_cme_options_pdf()
+    if result:
+        _options_oi_cache = {"data": result, "timestamp": now}
+        try:
+            with open(OPTIONS_OI_FILE, "w") as f:
+                json.dump(result, f)
+        except Exception:
+            pass
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +1350,7 @@ def get_lme_status():
     """LME market hours status based on London time.
     LME Select (electronic): 01:00-19:00 London
     Official Ring session: 11:40-17:00 London
+    Includes UK bank holiday closures.
     """
     from datetime import timezone
     import zoneinfo
@@ -602,6 +1368,16 @@ def get_lme_status():
     if wd >= 5:
         return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "weekend", "desc": ""}
 
+    # UK bank holidays — LME closed
+    # Easter-based dates shift yearly; update annually or compute dynamically
+    today_str = now_london.strftime("%m-%d")
+    year = now_london.year
+    uk_holidays = _get_uk_bank_holidays(year)
+    if now_london.date() in uk_holidays:
+        label = uk_holidays[now_london.date()]
+        return {"status": "CLOSED", "detail": "LME HOLIDAY", "color": "yellow", "session": "holiday",
+                "desc": label}
+
     # Ring session: 11:40 (700) - 17:00 (1020) London
     if 700 <= t < 1020:
         return {"status": "RING", "detail": "LME RING", "color": "green", "session": "ring",
@@ -613,6 +1389,68 @@ def get_lme_status():
                 "desc": "Electronic session \u2014 steady liquidity"}
 
     return {"status": "CLOSED", "detail": "LME CLOSED", "color": "yellow", "session": "closed", "desc": ""}
+
+
+def _get_uk_bank_holidays(year):
+    """Return dict of {date: label} for UK bank holidays that close the LME."""
+    from datetime import date, timedelta
+    holidays = {}
+
+    # Fixed dates
+    holidays[date(year, 1, 1)] = "New Year's Day"
+    holidays[date(year, 12, 25)] = "Christmas Day"
+    holidays[date(year, 12, 26)] = "Boxing Day"
+
+    # If Christmas/Boxing Day fall on weekend, substitute Monday/Tuesday
+    xmas = date(year, 12, 25)
+    if xmas.weekday() == 5:  # Saturday
+        holidays[date(year, 12, 27)] = "Christmas substitute"
+        holidays[date(year, 12, 28)] = "Boxing Day substitute"
+    elif xmas.weekday() == 6:  # Sunday
+        holidays[date(year, 12, 27)] = "Boxing Day substitute"
+        holidays[date(year, 12, 28)] = "Christmas substitute"
+
+    if date(year, 1, 1).weekday() == 5:
+        holidays[date(year, 1, 3)] = "New Year substitute"
+    elif date(year, 1, 1).weekday() == 6:
+        holidays[date(year, 1, 2)] = "New Year substitute"
+
+    # Early May bank holiday (first Monday in May)
+    d = date(year, 5, 1)
+    while d.weekday() != 0:
+        d += timedelta(days=1)
+    holidays[d] = "Early May Bank Holiday"
+
+    # Spring bank holiday (last Monday in May)
+    d = date(year, 5, 31)
+    while d.weekday() != 0:
+        d -= timedelta(days=1)
+    holidays[d] = "Spring Bank Holiday"
+
+    # Summer bank holiday (last Monday in August)
+    d = date(year, 8, 31)
+    while d.weekday() != 0:
+        d -= timedelta(days=1)
+    holidays[d] = "Summer Bank Holiday"
+
+    # Easter (computed via anonymous Gregorian algorithm)
+    a = year % 19
+    b, c = divmod(year, 100)
+    d_val, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d_val - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m_val = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m_val + 114) // 31
+    day = ((h + l - 7 * m_val + 114) % 31) + 1
+    easter_sunday = date(year, month, day)
+
+    holidays[easter_sunday - timedelta(days=2)] = "Good Friday"
+    holidays[easter_sunday + timedelta(days=1)] = "Easter Monday"
+
+    return holidays
 
 
 # ---------------------------------------------------------------------------
@@ -898,6 +1736,300 @@ def calc_fix_window(md, sig):
     elif trend == "DOWNTREND": factors.append("Downtrend")
 
     return {"score": score, "label": label, "color": color, "factors": factors}
+
+
+def calc_price_outlook(sig, md, cot, roll, options_oi=None):
+    """Directional price outlook for 3 timeframes: today, this week, this month.
+    Each returns score (-100 to +100), label, confidence, and top 2 reasons."""
+    if not sig or not md:
+        return None
+
+    roc = md.get("roc", {})
+    streak = md.get("streak", 0)
+    streak_dir = md.get("streak_dir")
+    vol_ratio = md.get("vol_ratio", 1.0)
+    dxy = md.get("dxy", {})
+    trend = sig.get("trend", "")
+    ts = sig.get("trend_strength", "")
+    price = md.get("price", 0)
+
+    # ── TODAY (intraday bias) ──
+    today_score = 0
+    today_reasons = []
+
+    # Momentum/ROC 1d-3d (heavy weight)
+    r1 = roc.get("1d", {}).get("pct", 0)
+    r3 = roc.get("3d", {}).get("pct", 0)
+    mom_avg = (r1 * 2 + r3) / 3
+    if mom_avg > 1.5:
+        today_score += 30; today_reasons.append(f"Strong momentum +{mom_avg:.1f}%")
+    elif mom_avg > 0.5:
+        today_score += 18; today_reasons.append(f"Positive momentum +{mom_avg:.1f}%")
+    elif mom_avg < -1.5:
+        today_score -= 30; today_reasons.append(f"Negative momentum {mom_avg:.1f}%")
+    elif mom_avg < -0.5:
+        today_score -= 18; today_reasons.append(f"Weak momentum {mom_avg:.1f}%")
+
+    # Streak direction
+    if streak >= 3 and streak_dir == "up":
+        today_score += 15; today_reasons.append(f"{streak}-day winning streak")
+    elif streak >= 3 and streak_dir == "down":
+        today_score -= 15; today_reasons.append(f"{streak}-day losing streak")
+    elif streak >= 2 and streak_dir == "up":
+        today_score += 8
+    elif streak >= 2 and streak_dir == "down":
+        today_score -= 8
+
+    # Volume conviction
+    if vol_ratio > 1.5 and r1 > 0:
+        today_score += 12; today_reasons.append("High volume confirms move")
+    elif vol_ratio > 1.5 and r1 < 0:
+        today_score -= 12; today_reasons.append("High volume selling")
+    elif vol_ratio < 0.5:
+        today_score -= 5  # thin volume = less reliable
+
+    # DXY intraday
+    dch = dxy.get("change_pct", 0)
+    if dch < -0.3:
+        today_score += 12; today_reasons.append("Dollar weakening")
+    elif dch > 0.3:
+        today_score -= 12; today_reasons.append("Dollar strengthening")
+
+    # China/LME session (more liquidity when open)
+    china = md.get("china", {})
+    if china.get("thin_liquidity"):
+        today_score *= 0.7  # dampen signals in thin markets
+        today_score = int(today_score)
+
+    # Calendar adjustments — TODAY
+    today_cal_note = None
+    now = datetime.now()
+    weekday = now.weekday()  # 0=Mon, 4=Fri
+    pct90 = md.get("pct_90d", 50)
+    days_fnd = roll.get("days_to_fnd", 99) if roll else 99
+
+    if weekday == 4 and pct90 >= 75:
+        today_score -= 10; today_reasons.append("Friday profit-taking risk")
+    if days_fnd <= 2:
+        today_score -= 12; today_reasons.append("FND imminent — roll selling")
+    if weekday == 4 and (now.hour > 15 or (now.hour == 15 and now.minute >= 30)):
+        today_cal_note = "COT report dropping — positioning shift possible"
+
+    today_score = max(-100, min(100, today_score))
+
+    # ── THIS WEEK ──
+    week_score = 0
+    week_reasons = []
+
+    # Trend + strength (primary)
+    if trend == "UPTREND" and ts == "strong":
+        week_score += 30; week_reasons.append("Strong uptrend")
+    elif trend == "UPTREND":
+        week_score += 18; week_reasons.append("Uptrend intact")
+    elif trend == "DOWNTREND" and ts == "strong":
+        week_score -= 30; week_reasons.append("Strong downtrend")
+    elif trend == "DOWNTREND":
+        week_score -= 18; week_reasons.append("Downtrend pressure")
+
+    # ROC 5d
+    r5 = roc.get("5d", {}).get("pct", 0)
+    if r5 > 2:
+        week_score += 20; week_reasons.append(f"5d momentum +{r5:.1f}%")
+    elif r5 > 0.5:
+        week_score += 10; week_reasons.append(f"5d momentum +{r5:.1f}%")
+    elif r5 < -2:
+        week_score -= 20; week_reasons.append(f"5d momentum {r5:.1f}%")
+    elif r5 < -0.5:
+        week_score -= 10; week_reasons.append(f"5d momentum {r5:.1f}%")
+
+    # COT weekly change
+    if cot:
+        wc = cot.get("mm_weekly_change", 0)
+        if wc > 5000:
+            week_score += 12; week_reasons.append("Funds adding longs")
+        elif wc < -5000:
+            week_score -= 12; week_reasons.append("Funds cutting longs")
+
+    # OI trend
+    if roll and roll.get("open_interest"):
+        oi = roll["open_interest"]
+        oi_trend = oi.get("trend", "")
+        if oi_trend == "building":
+            week_score += 8; week_reasons.append("Open interest building")
+        elif oi_trend == "declining":
+            week_score -= 8; week_reasons.append("Open interest declining")
+
+    # DXY trend
+    if dch < -0.3:
+        week_score += 8; week_reasons.append("Dollar weak")
+    elif dch > 0.3:
+        week_score -= 8; week_reasons.append("Dollar firm")
+
+    # S/R proximity
+    sr = md.get("support_resistance", {})
+    if sr:
+        supports = sr.get("support", [])
+        resistances = sr.get("resistance", [])
+        if supports and price:
+            nearest_sup = max(s["level"] for s in supports) if supports else 0
+            if nearest_sup and (price - nearest_sup) / price < 0.01:
+                week_score += 8; week_reasons.append("Near support")
+        if resistances and price:
+            nearest_res = min(r["level"] for r in resistances) if resistances else 999
+            if nearest_res and (nearest_res - price) / price < 0.01:
+                week_score -= 8; week_reasons.append("Near resistance")
+
+    # Options OI wall proximity
+    if options_oi and price:
+        pw = options_oi.get("put_wall")
+        cw = options_oi.get("call_wall")
+        mp = options_oi.get("max_pain")
+        if pw and price:
+            pw_dist = (price - pw["strike"]) / price
+            if pw_dist < 0.01 and pw_dist >= 0:
+                week_score += 12; week_reasons.append(f"Near put wall ${pw['strike']:.2f} (institutional support)")
+            elif pw_dist < 0:
+                week_score -= 8; week_reasons.append(f"Below put wall ${pw['strike']:.2f}")
+        if cw and price:
+            cw_dist = (cw["strike"] - price) / price
+            if cw_dist < 0.01 and cw_dist >= 0:
+                week_score -= 10; week_reasons.append(f"Near call wall ${cw['strike']:.2f} (institutional resistance)")
+            elif cw_dist < 0:
+                week_score += 8; week_reasons.append(f"Above call wall ${cw['strike']:.2f}")
+        if mp and price:
+            mp_dist = price - mp["strike"]
+            if abs(mp_dist) / price < 0.005:
+                week_reasons.append(f"At max pain ${mp['strike']:.2f} (expiry magnet)")
+
+    # Calendar adjustments — THIS WEEK
+    week_cal_note = None
+    if days_fnd <= 5:
+        penalty = 15 if days_fnd <= 2 else 8
+        week_score -= penalty
+        week_reasons.append(f"FND in {days_fnd} days — liquidity migrating")
+
+    # Month-end rebalancing: ≤5 trading days left in month + elevated price
+    today_date = now.date()
+    last_day = today_date.replace(day=calendar.monthrange(today_date.year, today_date.month)[1])
+    td_left = 0
+    d = today_date
+    while d <= last_day:
+        if d.weekday() < 5:
+            td_left += 1
+        d += timedelta(days=1)
+    if td_left <= 5 and pct90 >= 70:
+        week_score -= 8; week_reasons.append("Month-end rebalancing window")
+
+    if cot and cot.get("days_old", 0) > 9:
+        week_cal_note = "COT data stale — positioning uncertain"
+
+    week_score = max(-100, min(100, week_score))
+
+    # ── THIS MONTH ──
+    month_score = 0
+    month_reasons = []
+
+    # DMA alignment
+    above50 = sig.get("above_50", False)
+    above100 = sig.get("above_100", False)
+    above200 = sig.get("above_200", False)
+    dma_count = sum([above50, above100, above200])
+    if dma_count == 3:
+        month_score += 25; month_reasons.append("Above all moving averages")
+    elif dma_count == 2:
+        month_score += 12; month_reasons.append("Above 2 of 3 DMAs")
+    elif dma_count == 0:
+        month_score -= 25; month_reasons.append("Below all moving averages")
+    elif dma_count == 1:
+        month_score -= 10; month_reasons.append("Below most moving averages")
+
+    # COT percentile extremes (contrarian)
+    if cot:
+        pct = cot.get("mm_pct_52w", 50)
+        if pct > 90:
+            month_score -= 12; month_reasons.append(f"Funds crowded long ({pct:.0f}th pctl)")
+        elif pct > 70:
+            month_score += 8; month_reasons.append("Funds well positioned long")
+        elif pct < 10:
+            month_score += 15; month_reasons.append(f"Funds crowded short ({pct:.0f}th pctl)")
+        elif pct < 30:
+            month_score -= 5; month_reasons.append("Funds lightly positioned")
+
+    # Warehouse trend
+    wh = md.get("warehouse", {})
+    if wh:
+        wh_trend = wh.get("trend", "")
+        if wh_trend == "drawing":
+            month_score += 15; month_reasons.append("Warehouse stocks drawing")
+        elif wh_trend == "building":
+            month_score -= 15; month_reasons.append("Warehouse stocks building")
+
+    # Market structure (backwardation/contango)
+    if roll:
+        structure = roll.get("market_structure", "")
+        if structure == "backwardation":
+            month_score += 12; month_reasons.append("Backwardation (tight supply)")
+        elif structure == "contango":
+            month_score -= 8; month_reasons.append("Contango (ample supply)")
+
+    # 90d percentile (mean reversion at extremes)
+    if pct90 >= 90:
+        month_score -= 10; month_reasons.append(f"Near 90d highs ({pct90:.0f}th pctl)")
+    elif pct90 <= 10:
+        month_score += 10; month_reasons.append(f"Near 90d lows ({pct90:.0f}th pctl)")
+
+    # Fed rate trajectory
+    fed = md.get("fed", {})
+    if fed:
+        traj = fed.get("trajectory", "")
+        if traj == "cutting":
+            month_score += 10; month_reasons.append("Fed cutting rates")
+        elif traj == "hiking":
+            month_score -= 10; month_reasons.append("Fed hiking rates")
+
+    # Calendar adjustments — THIS MONTH
+    month_cal_note = None
+    if days_fnd <= 10:
+        month_score -= 5; month_reasons.append("Roll period approaching")
+
+    first_cut = fed.get("first_cut", "") if fed else ""
+    if first_cut and first_cut != "None priced":
+        cur_month_label = now.strftime("%b") + " " + now.strftime("%y")
+        next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+        next_month_label = next_month.strftime("%b") + " " + next_month.strftime("%y")
+        if first_cut in (cur_month_label, next_month_label):
+            month_score += 8; month_reasons.append(f"Rate cut expected {first_cut}")
+
+    month_score = max(-100, min(100, month_score))
+
+    # ── Build output ──
+    def _build(score, reasons, cal_note=None):
+        if score >= 40:
+            label = "HIGHER"
+        elif score >= 15:
+            label = "LEAN HIGHER"
+        elif score <= -40:
+            label = "LOWER"
+        elif score <= -15:
+            label = "LEAN LOWER"
+        else:
+            label = "NEUTRAL"
+        # Confidence = how many reasons agree on direction
+        pos_r = sum(1 for _ in reasons if score > 0)
+        neg_r = sum(1 for _ in reasons if score < 0)
+        conf = min(5, max(1, max(pos_r, neg_r)))
+        # Top 2 reasons
+        top2 = reasons[:2] if reasons else ["No strong signals"]
+        out = {"label": label, "score": score, "confidence": conf, "reasons": top2}
+        if cal_note:
+            out["calendar_note"] = cal_note
+        return out
+
+    return {
+        "today": _build(today_score, today_reasons, today_cal_note),
+        "week": _build(week_score, week_reasons, week_cal_note),
+        "month": _build(month_score, month_reasons, month_cal_note),
+    }
 
 
 def calc_fixable_orders(pos, md):
@@ -1200,12 +2332,14 @@ def get_contract_roll(copper_price=None):
             })
     contracts.sort(key=lambda c: c["fnd"])
 
-    front = None; next_mo = None
+    front = None; next_mo = None; third_mo = None
     for i, c in enumerate(contracts):
         if c["fnd"] >= today:
             front = c
             if i + 1 < len(contracts):
                 next_mo = contracts[i + 1]
+            if i + 2 < len(contracts):
+                third_mo = contracts[i + 2]
             break
     if not front:
         return None
@@ -1242,6 +2376,8 @@ def get_contract_roll(copper_price=None):
     }
     if next_mo:
         result["next_month"] = {"label": next_mo["label"], "ticker": next_mo["ticker"], "fnd": next_mo["fnd_str"]}
+    if third_mo:
+        result["third_month"] = {"label": third_mo["label"], "ticker": third_mo["ticker"], "fnd": third_mo["fnd_str"]}
     if copper_price is not None:
         result["front_price"] = round(copper_price, 4)
     else:
@@ -1261,21 +2397,47 @@ def get_contract_roll(copper_price=None):
             print(f"[WARN] Front month price error: {e}")
 
     # Fetch next month contract price for calendar spread
+    # Priority: TradingView HG2! → yfinance fallback
     if next_mo:
+        with _tv_lock:
+            tv2_price = _tv_state_2["price"]
+            tv2_age = time.time() - _tv_state_2["timestamp"] if _tv_state_2["timestamp"] else 999
+        if tv2_price and tv2_age < 120:
+            result["next_price"] = tv2_price
+            result["next_source"] = "tradingview"
+            print(f"[INFO] Next month (HG2! via TV): ${tv2_price:.4f}")
+        else:
+            try:
+                import yfinance as yf
+                t = yf.Ticker(next_mo["yf_ticker"])
+                # Try intraday first for most current price
+                h = t.history(period="1d", interval="5m")
+                if h.empty:
+                    h = t.history(period="5d")  # fallback to daily
+                if not h.empty:
+                    h = h.reset_index()
+                    h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
+                    result["next_price"] = round(float(h.iloc[-1]["Close"]), 4)
+                    result["next_source"] = "yfinance"
+                    print(f"[INFO] Next month {next_mo['ticker']} (yf): ${result['next_price']:.4f}")
+            except Exception as e:
+                print(f"[WARN] Next month price error: {e}")
+
+    # Fetch third month contract price
+    if third_mo:
         try:
             import yfinance as yf
-            t = yf.Ticker(next_mo["yf_ticker"])
-            # Try intraday first for most current price
+            t = yf.Ticker(third_mo["yf_ticker"])
             h = t.history(period="1d", interval="5m")
             if h.empty:
-                h = t.history(period="5d")  # fallback to daily
+                h = t.history(period="5d")
             if not h.empty:
                 h = h.reset_index()
                 h.columns = [c if isinstance(c, str) else c[0] for c in h.columns]
-                result["next_price"] = round(float(h.iloc[-1]["Close"]), 4)
-                print(f"[INFO] Next month {next_mo['ticker']}: ${result['next_price']:.4f}")
+                result["third_price"] = round(float(h.iloc[-1]["Close"]), 4)
+                print(f"[INFO] Third month {third_mo['ticker']}: ${result['third_price']:.4f}")
         except Exception as e:
-            print(f"[WARN] Next month price error: {e}")
+            print(f"[WARN] Third month price error: {e}")
 
     # Calendar spread
     if copper_price and result.get("next_price"):
@@ -1452,7 +2614,7 @@ def read_hedge_spreadsheet(filepath):
                     if s == "PRICED SO OS" and j == 0:
                         try: result["priced_sales_lbs"] = float(row[1]) if row[1] else 0
                         except: pass
-            # Per-commodity avg costs from Power BI (until Jorge adds cost column to spreadsheet)
+            # Fallback costs for spreadsheets without Inv Cost column
             _COST_PER_LB = {
                 "CU1": 5.280171, "CU2": 5.134602, "CU2DIRTY": 5.134602, "CUBB": 5.455980,
                 "CAT5": 2.024765, "CUINS1": 3.041050, "CUINS2": 2.093361,
@@ -1460,14 +2622,26 @@ def read_hedge_spreadsheet(filepath):
                 "CUCHOP CUBB": 4.616107, "CUCHOP1A_M": 4.616107, "CUCHOPS2": 4.616107,
             }
             total_cost = 0; total_cu_lbs = 0
-            # Extract per-commodity inventory from solid inventory columns (col 2=item, col 3=weight, col 5=CuUnits)
+            # Detect layout: Jorge added col 6 "Inv Cost" which shifts ICW columns by 1
+            has_cost_col = len(grid[5]) > 6 and str(grid[5][6]).strip().upper().startswith("INV COST")
+            icw_item_col = 10 if has_cost_col else 9
+            icw_wt_col = 11 if has_cost_col else 10
+            icw_cu_col = 13 if has_cost_col else 12
+            icw_cost_col = 14 if has_cost_col else -1
+            # Solid inventory: col 2=item, col 3=weight, col 5=CuUnits, col 6=Inv Cost (per raw lb)
             for row in grid[7:25]:
                 if len(row) > 5 and isinstance(row[2], str) and isinstance(row[5], (int, float)):
                     item = row[2].strip().upper()
                     cu = float(row[5])
                     wt = float(row[3]) if isinstance(row[3], (int, float)) else cu
-                    if item in _COST_PER_LB:
-                        total_cost += wt * _COST_PER_LB[item]; total_cu_lbs += cu
+                    # Read cost from spreadsheet col 6 if available, fall back to hardcoded
+                    cost = 0
+                    if has_cost_col and len(row) > 6 and isinstance(row[6], (int, float)) and row[6] > 0:
+                        cost = float(row[6])
+                    else:
+                        cost = _COST_PER_LB.get(item, 0)
+                    if cost > 0 and cu > 0:
+                        total_cost += wt * cost; total_cu_lbs += cu
                     if item.startswith("CUBB") and "CHOP" not in item:
                         result["inv_by_commodity"]["BB"] += cu
                     elif item.startswith("CU1"):
@@ -1485,14 +2659,21 @@ def read_hedge_spreadsheet(filepath):
                         result["inv_by_commodity"]["Chops"] += icw_cu
                         result["icw_cu_lbs"] = icw_cu
                         result["chops_solid_lbs"] = result["inv_by_commodity"]["Chops"] - icw_cu
-            # ICW per-item costs (col 9=item, col 10=weight, col 12=CuUnits)
+            # ICW per-item costs (column positions adapt to layout)
             for row in grid[7:25]:
-                if len(row) > 12 and isinstance(row[9], str) and isinstance(row[10], (int, float)):
-                    item = row[9].strip().upper()
-                    wt = float(row[10])
-                    cu = float(row[12]) if isinstance(row[12], (int, float)) else 0
-                    if item in _COST_PER_LB:
-                        total_cost += wt * _COST_PER_LB[item]; total_cu_lbs += cu
+                if len(row) > icw_cu_col and isinstance(row[icw_item_col], str) and isinstance(row[icw_wt_col], (int, float)):
+                    item = row[icw_item_col].strip().upper()
+                    wt = float(row[icw_wt_col])
+                    cu = float(row[icw_cu_col]) if isinstance(row[icw_cu_col], (int, float)) else 0
+                    # Read cost from spreadsheet if available, fall back to hardcoded
+                    cost = 0
+                    if icw_cost_col >= 0 and len(row) > icw_cost_col and isinstance(row[icw_cost_col], (int, float)) and row[icw_cost_col] > 0:
+                        cost = float(row[icw_cost_col])
+                    else:
+                        cost = _COST_PER_LB.get(item, 0)
+                    if cost > 0 and cu > 0:
+                        # Cost is "as is" (per raw lb) — multiply by gross weight
+                        total_cost += wt * cost; total_cu_lbs += cu
             # Avg cost per lb of recovered copper (total $ paid / total Cu lbs out)
             result["avg_cost"] = round(total_cost / total_cu_lbs, 6) if total_cu_lbs > 0 else 0
 
@@ -1665,14 +2846,17 @@ def fetch_copper_data():
         return _copper_cache["data"]
 
     try:
-        # Try investing.com first, fall back to yfinance
+        # Try yfinance first (closer to CME settlements), fall back to investing.com
         ohlc = None
         try:
-            ohlc = _fetch_ohlc_investiny()
-        except Exception as e:
-            print(f"[WARN] investiny error: {e}")
-        if not ohlc:
             ohlc = _fetch_ohlc_yfinance()
+        except Exception as e:
+            print(f"[WARN] yfinance error: {e}")
+        if not ohlc:
+            try:
+                ohlc = _fetch_ohlc_investiny()
+            except Exception as e:
+                print(f"[WARN] investiny error: {e}")
         if not ohlc:
             return None
 
@@ -1685,13 +2869,23 @@ def fetch_copper_data():
         change_pct = (change / prev_close) * 100 if prev_close else 0
 
         # Determine previous settlement for RT overlay
-        # If daily data includes today (partial bar), prev settle = closes[-2]
-        # If daily data ends yesterday, prev settle = closes[-1]
+        # After 5PM CT: use 4PM settlement from intraday data (daily bar keeps updating)
+        # During the day: today's bar is partial, use yesterday's close
         today_date = datetime.now().date()
         last_ohlc_date = dates[-1].date() if hasattr(dates[-1], 'date') else dates[-1]
         if isinstance(last_ohlc_date, datetime):
             last_ohlc_date = last_ohlc_date.date()
-        if last_ohlc_date >= today_date and n_closes > 1:
+        new_session = _is_new_comex_session()
+        if new_session:
+            # Try to get exact 4PM CT settlement from intraday bars
+            settle = _fetch_session_settle()
+            if settle:
+                _daily_prev_settle = settle
+            elif last_ohlc_date >= today_date and n_closes > 1:
+                _daily_prev_settle = closes[-2]  # fallback: yesterday
+            else:
+                _daily_prev_settle = closes[-1]
+        elif last_ohlc_date >= today_date and n_closes > 1:
             _daily_prev_settle = closes[-2]
         else:
             _daily_prev_settle = closes[-1]
@@ -1711,12 +2905,23 @@ def fetch_copper_data():
             avg_vol = None
             vol_ratio = 1.0
 
+        # Prefer TradingView live volume; fall back to yfinance
+        with _tv_lock:
+            tv_vol = _tv_state.get("volume")
+        session_vol = int(tv_vol) if tv_vol else (int(vol) if vol else None)
+        if session_vol:
+            _record_volume_snapshot(session_vol)
+        parallel_avg = _get_parallel_avg_volume()
+
         recent = closes[-5:] if n_closes >= 5 else closes
         spark_30d = [{"date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10],
                       "close": round(c, 4)} for d, c in zip(dates[-30:], closes[-30:])]
         spark_7d = [{"date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10],
                      "close": round(c, 4)} for d, c in zip(dates[-7:], closes[-7:])]
         spark_1d = fetch_intraday_spark() or []
+        # Full COMEX history for chart timeframe toggles (up to all available data)
+        spark_full = [{"date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10],
+                       "close": round(c, 4)} for d, c in zip(dates, closes)]
 
         today_high = highs[-1]; today_low = lows[-1]
         today_range = today_high - today_low
@@ -1751,23 +2956,85 @@ def fetch_copper_data():
         sr = calc_support_resistance(closes, highs, lows)
         lme = fetch_lme_price()
         lme_price = lme["price_lb"]; lme_mt = lme["price_mt"]; lme_source = lme["source"]
-        spread = round(price - lme_price, 4) if lme_price else None
+        lme_st = get_lme_status()
+        comex_st = get_comex_status()
+
+        # --- Contemporaneous spread: peak-hours snapshot ---
+        # Both markets are liquid during COMEX peak (7:30-10 AM CT) + LME Ring.
+        # Capture a snapshot during that overlap; once the window passes, lock it.
+        spread_timing = None  # "peak" = snapshot, "stale" = no snapshot available
+        spread = None; spread_pct = None
+        if lme_price:
+            lme_ring = lme_st.get("session") == "ring" or lme_st.get("status") == "RING"
+            comex_peak = comex_st.get("window") == "peak"
+            both_liquid = lme_ring and comex_peak
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            history = load_spread_history()
+            today_entry = history[-1] if history and history[-1].get("date") == today_str else None
+
+            if both_liquid:
+                # Both markets open & liquid — capture live contemporaneous spread
+                spread = round(price - lme_price, 4)
+                spread_timing = "peak"
+                # Save as peak snapshot
+                entry = {"date": today_str, "comex": round(price, 4), "lme": round(lme_price, 4),
+                         "spread": spread, "peak_snapshot": True}
+                if today_entry:
+                    history[-1] = entry
+                else:
+                    history.append(entry)
+                history = history[-180:]
+                try:
+                    with open(SPREAD_HISTORY, "w") as f: json.dump(history, f)
+                except: pass
+            elif today_entry and today_entry.get("peak_snapshot"):
+                # Window passed but we have today's snapshot — use it
+                spread = today_entry["spread"]
+                spread_timing = "peak"
+            else:
+                # No snapshot yet today (dashboard started late, or weekend)
+                # Fall back to raw diff but mark it stale
+                spread = round(price - lme_price, 4)
+                spread_timing = "stale"
+                # Still save for history continuity
+                entry = {"date": today_str, "comex": round(price, 4), "lme": round(lme_price, 4),
+                         "spread": spread, "peak_snapshot": False}
+                if today_entry:
+                    if not today_entry.get("peak_snapshot"):
+                        history[-1] = entry
+                else:
+                    history.append(entry)
+                history = history[-180:]
+                try:
+                    with open(SPREAD_HISTORY, "w") as f: json.dump(history, f)
+                except: pass
+
         spread_pct = round((spread / lme_price) * 100, 2) if lme_price and spread else None
         spread_intel = None
         lme_change = None; lme_change_pct = None; lme_prev_lb = None
+        # Use live WebSocket change data when available
+        if lme_source == "live" and lme.get("change_lb") is not None:
+            lme_change = lme["change_lb"]
+            lme_change_pct = lme.get("change_pct")
+        elif spread is not None and lme_price:
+            # Fallback: derive change from spread history
+            history_for_change = load_spread_history()
+            if len(history_for_change) >= 2:
+                for i in range(len(history_for_change) - 2, -1, -1):
+                    prev_lme = history_for_change[i].get("lme")
+                    if prev_lme and prev_lme != lme_price:
+                        lme_prev_lb = prev_lme
+                        lme_change = round(lme_price - lme_prev_lb, 4)
+                        lme_change_pct = round((lme_change / lme_prev_lb) * 100, 2)
+                        break
         if spread is not None and lme_price:
-            history = save_spread_entry(round(price, 4), round(lme_price, 4), round(spread, 4))
+            history = load_spread_history()
             spread_intel = compute_spread_intelligence(history, spread)
-            # LME daily change — use previous day's LME price from spread history
-            if len(history) >= 2:
-                lme_prev_lb = history[-2]["lme"]
-                lme_change = round(lme_price - lme_prev_lb, 4)
-                lme_change_pct = round((lme_change / lme_prev_lb) * 100, 2)
 
         dxy = fetch_dxy()
         china = get_china_status()
-        lme_status = get_lme_status()
-        comex_status = get_comex_status()
+        lme_status = lme_st
+        comex_status = comex_st
         fed = fetch_fed_data()
         warehouse = get_warehouse_data()
 
@@ -1784,16 +3051,18 @@ def fetch_copper_data():
             "ma50": round(ma50, 4), "ma100": round(ma100, 4), "ma200": round(ma200, 4),
             "vol_ratio": round(vol_ratio, 2),
             "volume": int(vol) if vol else None, "avg_volume": int(avg_vol) if avg_vol else None,
+            "parallel_avg_volume": parallel_avg,
             "is_peak": comex_status.get("is_peak", False),
             "recent_closes": [round(c, 4) for c in recent],
             "sparkline": spark_30d, "spark_7d": spark_7d, "spark_1d": spark_1d,
-            "lme_spark": lme_spark, "copper_source": copper_source,
+            "spark_full": spark_full, "lme_spark": lme_spark, "copper_source": copper_source,
             "lme_price_lb": lme_price, "lme_price_mt": lme_mt, "lme_source": lme_source,
             "lme_cash_mt": _lme_cash_mt(lme_mt, warehouse),
             "lme_cash_lb": _lme_cash_lb(lme_mt, warehouse),
             "lme_cash_3m_spread_mt": _lme_cash_3m_spread(lme_mt, warehouse),
             "lme_change": lme_change, "lme_change_pct": lme_change_pct,
-            "comex_lme_spread": spread, "comex_lme_spread_pct": spread_pct, "spread_intel": spread_intel,
+            "comex_lme_spread": spread, "comex_lme_spread_pct": spread_pct,
+            "spread_timing": spread_timing, "spread_intel": spread_intel,
             "today_high": round(today_high, 4), "today_low": round(today_low, 4),
             "today_range": round(today_range, 4),
             "pct_30d": pct_30d, "pct_90d": pct_90d,
@@ -1849,6 +3118,9 @@ def compute_signals(md):
     elif cb100 >= 2: tbw = "2+ closes below 100DMA \u2014 mills may shade bids"
 
     ft = CFG["FIX_TARGET"]
+    # Auto-adjust fix target if price has moved >15% away
+    if ft and p and abs(p - ft) / ft > 0.15:
+        ft = round(p + 0.05, 2)  # set target 5c above current
     if mt in ("LIQUIDATION", "FLASH_CRASH"):
         sig, sc, sd_txt = "BUY OPP", "blue", "Competitors scared \u2014 strong buying opportunity"
     elif mt == "BIG_DROP":
@@ -1914,26 +3186,56 @@ def compute_signals(md):
 # GTC SUGGESTIONS
 # ---------------------------------------------------------------------------
 def gen_gtc(position, md):
+    """Generate GTC suggestions: 2 sell orders above + 2 buy orders below current price.
+    Above = lock in margin when market is up.
+    Below = limit downside / cut losses.
+    """
     if not position or not md: return []
     p = md["price"]; net = position.get("net_lbs", 0)
-    if net <= 0: return []
-    tl = CFG["TRUCKLOAD_LBS"]; loads = int(net / tl)
-    levels = [l for l in CFG["GTC_LEVELS"] if l > p - 0.05]
+    tl = CFG["TRUCKLOAD_LBS"]
+    LBS_PER_MT = 2204.62
     suggestions = []
-    if not levels:
-        suggestions.append({"action": "PRICE NOW", "detail": f"Above all targets \u2014 fix {loads} loads ({int(net):,} lbs) at ${p:.4f}", "urgency": "high"})
-        return suggestions
-    per = max(1, loads // len(levels)); rem = loads
-    for lvl in levels:
-        if rem <= 0: break
-        n = min(per, rem); lbs = n * tl
-        if lvl <= p:
-            suggestions.append({"action": "FIX NOW", "detail": f"Fix {n} load{'s' if n>1 else ''} ({lbs:,} lbs) at ${lvl:.2f} \u2014 price is here", "urgency": "high", "level": lvl})
-        elif lvl <= p + 0.10:
-            suggestions.append({"action": "GTC", "detail": f"GTC {n} load{'s' if n>1 else ''} ({lbs:,} lbs) at ${lvl:.2f} \u2014 {(lvl-p)*100:.1f}c away", "urgency": "medium", "level": lvl})
-        else:
-            suggestions.append({"action": "GTC", "detail": f"GTC {n} load{'s' if n>1 else ''} ({lbs:,} lbs) at ${lvl:.2f} \u2014 {(lvl-p)*100:.1f}c away", "urgency": "low", "level": lvl})
-        rem -= n
+
+    def _lme_mt(lb_price):
+        return round(lb_price * LBS_PER_MT)
+
+    # --- SELL LIMIT (lock in margin when market is up) ---
+    if net > 0:
+        loads = max(1, int(net / tl))
+        sell_per = max(1, loads // 2)
+        # +10c above current
+        lvl1 = round(p + 0.10, 2)
+        n1 = min(sell_per, loads)
+        suggestions.append({
+            "action": "SELL LIMIT GTC", "level": lvl1, "urgency": "medium",
+            "detail": f"Fix {n1} load{'s' if n1>1 else ''} ({n1*tl:,} lbs) at ${lvl1:.2f}/lb (\u2248${_lme_mt(lvl1):,}/MT) \u2014 +10\u00a2",
+            "side": "sell",
+        })
+        # +20c above current
+        lvl2 = round(p + 0.20, 2)
+        n2 = min(sell_per, max(1, loads - n1))
+        suggestions.append({
+            "action": "SELL LIMIT GTC", "level": lvl2, "urgency": "low",
+            "detail": f"Fix {n2} load{'s' if n2>1 else ''} ({n2*tl:,} lbs) at ${lvl2:.2f}/lb (\u2248${_lme_mt(lvl2):,}/MT) \u2014 +20\u00a2",
+            "side": "sell",
+        })
+
+    # --- SELL STOP (limit downside / stop loss) ---
+    # -10c below current
+    lvl3 = round(p - 0.10, 2)
+    suggestions.append({
+        "action": "SELL STOP GTC", "level": lvl3, "urgency": "medium",
+        "detail": f"Stop loss: fix 1 load ({tl:,} lbs) at ${lvl3:.2f}/lb (\u2248${_lme_mt(lvl3):,}/MT) \u2014 \u221210\u00a2",
+        "side": "buy",
+    })
+    # -20c below current
+    lvl4 = round(p - 0.20, 2)
+    suggestions.append({
+        "action": "SELL STOP GTC", "level": lvl4, "urgency": "low",
+        "detail": f"Stop loss: fix 1 load ({tl:,} lbs) at ${lvl4:.2f}/lb (\u2248${_lme_mt(lvl4):,}/MT) \u2014 \u221220\u00a2",
+        "side": "buy",
+    })
+
     return suggestions
 
 
@@ -1984,6 +3286,19 @@ def calc_risk(pos, md):
     if not pos or not md: return None
     p = md["price"]; net = pos["net_lbs"]; ac = pos["avg_cost"]; hl = pos.get("hedge_lbs", 0)
     uh = net - hl; mtm = (p - ac) * net
+    # Sales by basis (COMEX vs LME)
+    comex_sales_lbs = 0; lme_sales_lbs = 0
+    for sale_list in [pos.get("sales_priced_unshipped", []),
+                      pos.get("sales_unpriced_shipped", []),
+                      pos.get("sales_unpriced_unshipped", [])]:
+        for sale in sale_list:
+            lbs = sale.get("priced_lbs", 0) or sale.get("open_lbs", 0) or sale.get("lbs", 0)
+            if sale.get("basis") == "LME":
+                lme_sales_lbs += lbs
+            else:
+                comex_sales_lbs += lbs
+    # Add priced+shipped (already sold, no longer in lists) from totals minus what's in lists
+    # The lists above cover all open sales, which is what matters for basis exposure
     return {
         "net_lbs": net, "unhedged_lbs": uh, "avg_cost": round(ac, 4),
         "mtm_pl": round(mtm, 2), "risk_per_cent": round(uh * 0.01, 2),
@@ -2006,44 +3321,82 @@ def calc_risk(pos, md):
         "sales_by_commodity": pos.get("sales_by_commodity", {}),
         "icw_cu_lbs": pos.get("icw_cu_lbs", 0),
         "chops_solid_lbs": pos.get("chops_solid_lbs", 0),
+        "comex_sales_lbs": round(comex_sales_lbs),
+        "lme_sales_lbs": round(lme_sales_lbs),
+        "comex_hedge_lbs": abs(pos.get("comex_futures", 0)),
+        "lme_hedge_lbs": abs(pos.get("lme_futures", 0)),
     }
 
 
+def _grade_for_commodity(raw):
+    """Map ROM commodity name to standard grade. Mirrors JS soGrade()."""
+    c = (raw or "").upper()
+    if "CHOP" in c: return "Chops"
+    if "CUBB" in c: return "BB"
+    if "CU1" in c: return "#1"
+    if "CU2" in c: return "#2"
+    return None  # ICW grades (THHN/MCM/etc.) not modeled in cats4
+
+
+def _so_eff_price(so, comex, lme):
+    """Effective sell price for an SO: locked price if priced, else project at current."""
+    if so.get("price"):
+        return so["price"]
+    spread = so.get("spread", 0)
+    basis = so.get("basis", "COMEX")
+    if basis == "LME" and lme:
+        return (lme * spread) if spread else lme
+    return (comex - spread) if spread else comex
+
+
 def calc_margin_projection(pos, md, risk):
-    if not pos or not md or not risk: return None
+    """Live GM = avg SO sell price − avg ROM grade cost, both sales-weighted per grade.
+    Mirrors the blended table's All-row math so the two displays line up exactly."""
+    if not pos or not md: return None
     comex = md.get("price", 0)
     lme = md.get("lme_price_lb", 0)
-    avg_cost = risk.get("avg_cost", 0)
-    if not comex or not avg_cost: return None
+    grade_costs = pos.get("grade_costs") or {}
+    if not comex or not grade_costs: return None
 
-    # Priced sales — use pre-computed aggregates (priced_tons × final_price)
-    priced_lbs = pos.get("priced_sales_lbs", 0)
-    priced_avg = pos.get("priced_sales_avg", 0)
-    priced_rev = priced_lbs * priced_avg
+    # Walk every open SO (priced + unpriced) and accumulate per-grade lbs/rev/cost.
+    # Skip SOs whose grade isn't in BB/#1/#2/Chops or has no cost data (e.g. ICW).
+    per_grade = {}  # grade -> {"lbs", "rev", "cost"}
+    priced_lbs = 0
+    unpriced_lbs = 0
 
-    # Unpriced sales — project each at current market using open_lbs
-    unpriced_rev = 0; unpriced_lbs = 0
-    for sale_list in [pos.get("sales_unpriced_shipped", []), pos.get("sales_unpriced_unshipped", [])]:
-        for sale in sale_list:
-            lbs = sale.get("open_lbs", sale.get("lbs", 0))
-            spread = sale.get("spread", 0)
-            if lbs <= 0: continue
-            basis = sale.get("basis", "COMEX")
-            if basis == "LME" and lme:
-                proj = lme * spread if spread else lme
+    so_lists = (
+        ("sales_priced_unshipped", "priced"),
+        ("sales_unpriced_shipped", "unpriced"),
+        ("sales_unpriced_unshipped", "unpriced"),
+    )
+    for key, kind in so_lists:
+        for sale in pos.get(key, []):
+            g = _grade_for_commodity(sale.get("commodity"))
+            if g is None or g not in grade_costs:
+                continue
+            lbs = (sale.get("priced_lbs") if kind == "priced" else sale.get("open_lbs")) or sale.get("lbs") or 0
+            if lbs <= 0:
+                continue
+            eff = _so_eff_price(sale, comex, lme)
+            gd = per_grade.setdefault(g, {"lbs": 0, "rev": 0, "cost": 0})
+            gd["lbs"] += lbs
+            gd["rev"] += lbs * eff
+            gd["cost"] += lbs * grade_costs[g]
+            if kind == "priced":
+                priced_lbs += lbs
             else:
-                proj = comex - spread if spread else comex
-            unpriced_rev += lbs * proj; unpriced_lbs += lbs
+                unpriced_lbs += lbs
 
-    total_lbs = priced_lbs + unpriced_lbs
-    total_rev = priced_rev + unpriced_rev
-    if total_lbs <= 0: return None
+    total_lbs = sum(gd["lbs"] for gd in per_grade.values())
+    total_rev = sum(gd["rev"] for gd in per_grade.values())
+    total_cost = sum(gd["cost"] for gd in per_grade.values())
+    if total_lbs <= 0:
+        return None
 
     avg_sell = total_rev / total_lbs
+    avg_cost = total_cost / total_lbs
     gm_per_lb = avg_sell - avg_cost
     return {
-        "priced_revenue": round(priced_rev, 2),
-        "unpriced_revenue_now": round(unpriced_rev, 2),
         "total_revenue_now": round(total_rev, 2),
         "priced_lbs": round(priced_lbs),
         "unpriced_lbs": round(unpriced_lbs),
@@ -2073,12 +3426,11 @@ def load_broker_intel():
         return None
 
 
-def save_broker_intel(text):
-    """Save broker intel and extract signals with short-term and long-term outlook."""
+def _keyword_intel(text):
+    """Fallback: extract signals via keyword matching (used if Claude API unavailable)."""
     signals = []
     t = text.lower()
 
-    # --- Demand signals ---
     if any(w in t for w in ["china backing off", "china demand weak", "china slowing", "china retreat"]):
         signals.append({"short": "bear", "long": "watch",
             "headline": "China pulling back",
@@ -2089,8 +3441,6 @@ def save_broker_intel(text):
             "headline": "Economic slowdown concerns",
             "near": "Traders sell copper on recession fears — expect downward pressure",
             "far": "If real, copper demand drops for months. Major risk to being long"})
-
-    # --- Price action signals ---
     if any(w in t for w in ["softer", "eases", "easing", "prices lower", "prices down", "selling pressure"]):
         signals.append({"short": "bear", "long": "watch",
             "headline": "Prices softening",
@@ -2106,8 +3456,6 @@ def save_broker_intel(text):
             "headline": "Prices rallying",
             "near": "Momentum buyers pushing prices up — don't chase, but don't sell into strength either",
             "far": "Could be start of a new leg up, or could fade. Watch if it holds above prior highs"})
-
-    # --- Positioning signals ---
     if any(w in t for w in ["call option", "call oi", "calls increase", "bullish option", "bullish bet"]):
         signals.append({"short": "watch", "long": "bull",
             "headline": "Big call option activity",
@@ -2123,15 +3471,11 @@ def save_broker_intel(text):
             "headline": "Put option activity rising",
             "near": "Could be hedging existing long positions or genuine bearish bets",
             "far": "If sustained, smart money may be positioning for a move lower"})
-
-    # --- Supply signals ---
     if any(w in t for w in ["supply disrupt", "supply threat", "mine shut", "mine strike", "peru", "chile", "congo", "zambia"]):
         signals.append({"short": "watch", "long": "bull",
             "headline": "Mine/supply disruption risk",
             "near": "Threats don't move prices much until they become real disruptions",
             "far": "Copper supply is already tight. Any actual shutdown tightens the market further — bullish for prices"})
-
-    # --- Policy / macro signals ---
     if any(w in t for w in ["stimulus", "npc", "national people", "infrastructure", "green energy", "ev demand"]):
         signals.append({"short": "watch", "long": "bull",
             "headline": "Stimulus / policy catalyst ahead",
@@ -2152,8 +3496,6 @@ def save_broker_intel(text):
             "headline": "Policy meeting ahead",
             "near": "Wait for details before acting",
             "far": "Energy policy could boost copper demand (EVs, grid) or hurt it (tariffs, regulation)"})
-
-    # --- Inventory signals ---
     if any(w in t for w in ["warehouse draw", "inventory draw", "stocks fall", "stocks decline"]):
         signals.append({"short": "bull", "long": "bull",
             "headline": "Warehouse inventories dropping",
@@ -2164,15 +3506,11 @@ def save_broker_intel(text):
             "headline": "Warehouse inventories rising",
             "near": "More copper sitting in warehouses — less urgency to buy. Prices may soften",
             "far": "Could be seasonal or temporary restocking. Watch the trend over weeks, not days"})
-
-    # --- China physical demand signals ---
     if any(w in t for w in ["yangshan premium", "china buying", "china import", "stockpiling", "strategic stockpil"]):
         signals.append({"short": "bull", "long": "bull",
             "headline": "China physical buying picking up",
             "near": "Real demand from the biggest buyer — supports prices even during paper selling",
             "far": "When China stockpiles copper, it tightens global supply for months. Bullish signal"})
-
-    # --- Dollar signals ---
     if any(w in t for w in ["dollar firm", "dollar strength", "dollar index firm", "dxy rise", "dxy up", "stronger dollar"]):
         signals.append({"short": "bear", "long": "watch",
             "headline": "Dollar strengthening",
@@ -2183,6 +3521,272 @@ def save_broker_intel(text):
             "headline": "Dollar weakening",
             "near": "Weaker dollar makes copper cheaper globally — tailwind for prices",
             "far": "If driven by rate cuts, sustained weakness supports higher copper prices"})
+    return signals
+
+
+# ---------------------------------------------------------------------------
+# DAILY MARKET INSIGHT — AI-generated morning briefing
+# ---------------------------------------------------------------------------
+
+def _fetch_google_news_headlines(max_items=8):
+    """Scrape Google News RSS for copper market headlines."""
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    url = "https://news.google.com/rss/search?q=copper+market+price&hl=en-US&gl=US&ceid=US:en"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            xml_data = resp.read()
+        root = ET.fromstring(xml_data)
+        items = []
+        for item in root.iter("item"):
+            title = item.findtext("title", "")
+            source = item.findtext("source", "")
+            pub_date = item.findtext("pubDate", "")
+            if title:
+                items.append({"title": title, "source": source, "pub_date": pub_date})
+            if len(items) >= max_items:
+                break
+        return items
+    except Exception as e:
+        print(f"[WARN] Google News fetch failed: {e}")
+        return []
+
+
+def _build_insight_context(md, sig, cot, roll, outlook):
+    """Serialize key market data into plain text for Claude prompt."""
+    lines = []
+    if md:
+        lines.append(f"COMEX Copper: ${md.get('price', 0):.4f}/lb  change: {md.get('change', 0):+.4f} ({md.get('change_pct', 0):+.1f}%)")
+        if md.get("lme_price_lb"):
+            lines.append(f"LME Copper: ${md['lme_price_lb']:.4f}/lb  spread vs COMEX: {md.get('comex_lme_spread', 0):+.4f}")
+        if md.get("ma50"):
+            lines.append(f"Moving averages: 50d={md['ma50']:.4f}  100d={md.get('ma100', 0):.4f}  200d={md['ma200']:.4f}")
+        roc = md.get("roc", {})
+        if roc:
+            parts = []
+            for k in ("1d", "5d", "20d"):
+                r = roc.get(k, {})
+                if r.get("pct") is not None:
+                    parts.append(f"{k}: {r['pct']:+.1f}%")
+            if parts:
+                lines.append(f"Rate of change: {', '.join(parts)}")
+        if md.get("dxy"):
+            dxy = md["dxy"]
+            lines.append(f"DXY (Dollar Index): {dxy.get('price', 'N/A')} change: {dxy.get('change', 'N/A')}")
+        wh = md.get("warehouse", {})
+        if wh.get("global_mt"):
+            lines.append(f"Global warehouse: {wh['global_mt']:,} MT")
+        if wh.get("comex", {}).get("mt"):
+            lines.append(f"  COMEX: {wh['comex']['mt']:,} MT  trend: {wh['comex'].get('trend', 'N/A')}")
+        if wh.get("lme", {}).get("mt"):
+            lines.append(f"  LME: {wh['lme']['mt']:,} MT  trend: {wh['lme'].get('trend', 'N/A')}")
+    if sig:
+        lines.append(f"Trend: {sig.get('trend', 'N/A')} ({sig.get('trend_strength', '')})")
+    if cot:
+        mm_net = cot.get("mm_net", cot.get("fund_net", "N/A"))
+        mm_chg = cot.get("mm_weekly_change", cot.get("fund_net_change", "N/A"))
+        mm_pct = cot.get("mm_pct_52w", cot.get("fund_pctile", "N/A"))
+        lines.append(f"COT Managed Money Net: {mm_net} contracts  weekly change: {mm_chg}  52w percentile: {mm_pct}%")
+    if roll:
+        lines.append(f"Front month: {roll.get('front_month', 'N/A')}  spread: {roll.get('calendar_spread', 'N/A')}  structure: {roll.get('market_structure', 'N/A')}")
+        if roll.get("open_interest"):
+            oi = roll["open_interest"]
+            lines.append(f"Open Interest: {oi.get('total', 'N/A')}  trend: {oi.get('trend', 'N/A')}")
+    if outlook:
+        for tf in ("today", "this_week", "this_month"):
+            o = outlook.get(tf)
+            if o:
+                lines.append(f"Outlook {tf}: {o.get('label', '')} (score {o.get('score', 0)}, confidence {o.get('confidence', '')})")
+    return "\n".join(lines)
+
+
+def _claude_daily_insight(md, sig, cot, roll, outlook, headlines):
+    """Call Claude Haiku to generate daily market insight bullets."""
+    import anthropic
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key or api_key == "YOUR_KEY_HERE":
+        return None
+
+    context = _build_insight_context(md, sig, cot, roll, outlook)
+    headline_text = ""
+    if headlines:
+        headline_text = "\n\nRECENT NEWS HEADLINES:\n" + "\n".join(
+            f"- {h['title']}" + (f" ({h['source']})" if h.get("source") else "")
+            for h in headlines
+        )
+
+    user_msg = (
+        f"Today is {datetime.now().strftime('%A, %B %d, %Y')}.\n\n"
+        f"CURRENT MARKET DATA:\n{context}"
+        f"{headline_text}\n\n"
+        "Write 4-5 bullet points for this morning's copper market briefing. "
+        "Label each bullet with one of: [PRICE], [FUNDS], [MACRO], [SUPPLY], [OUTLOOK]. "
+        "The final bullet MUST include an actionable implication for a physical copper buyer. "
+        "Start each bullet with '• [LABEL] ' then the text. No other formatting."
+    )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=600,
+        system=(
+            "You are a senior copper market analyst writing a morning briefing for Geomet, "
+            "a scrap metal recycler. Your audience buys physical copper scrap and hedges with "
+            "COMEX futures. Write in plain, direct language. Return plain text only: one bullet "
+            "per line starting with '• '. No markdown."
+        ),
+        messages=[{"role": "user", "content": user_msg}],
+        timeout=20.0,
+    )
+    raw = resp.content[0].text.strip()
+    bullets = [line.strip() for line in raw.split("\n") if line.strip().startswith("•")]
+    return bullets if bullets else None
+
+
+def _fallback_insight(md, sig, cot, roll, outlook):
+    """Template-based insight bullets when Claude is unavailable."""
+    bullets = []
+    if md:
+        direction = "higher" if md.get("change", 0) > 0 else "lower" if md.get("change", 0) < 0 else "flat"
+        bullets.append(f"• [PRICE] COMEX copper is trading {direction} at ${md.get('price', 0):.4f}/lb ({md.get('change_pct', 0):+.1f}%).")
+    mm_net = cot.get("mm_net") if cot else None
+    if mm_net is not None:
+        stance = "net long" if mm_net > 0 else "net short" if mm_net < 0 else "flat"
+        pctile = cot.get("mm_pct_52w", "N/A")
+        bullets.append(f"• [FUNDS] Managed money is {stance} {abs(mm_net):,} contracts (52w percentile: {pctile}%).")
+    if md and md.get("dxy"):
+        dxy = md["dxy"]
+        bullets.append(f"• [MACRO] Dollar index at {dxy.get('price', 'N/A')} — {'headwind' if dxy.get('change', 0) > 0 else 'tailwind'} for copper.")
+    if md and md.get("warehouse"):
+        wh = md["warehouse"]
+        comex_wh = wh.get("comex", {})
+        lme_wh = wh.get("lme", {})
+        global_mt = wh.get("global_mt")
+        if global_mt:
+            parts = [f"Global warehouse stocks at {global_mt:,} MT"]
+            if comex_wh.get("mt"):
+                parts.append(f"COMEX {comex_wh['mt']:,} ({comex_wh.get('trend', '?')})")
+            if lme_wh.get("mt"):
+                parts.append(f"LME {lme_wh['mt']:,} ({lme_wh.get('trend', '?')})")
+            bullets.append(f"• [SUPPLY] {', '.join(parts)}.")
+        elif comex_wh.get("mt"):
+            bullets.append(f"• [SUPPLY] COMEX warehouse stocks at {comex_wh['mt']:,} MT, trend {comex_wh.get('trend', 'unknown')}.")
+    if outlook and outlook.get("today"):
+        o = outlook["today"]
+        bullets.append(f"• [OUTLOOK] Today's bias: {o.get('label', 'neutral')} — physical buyers should {'wait for pullbacks' if o.get('score', 0) > 15 else 'consider covering needs' if o.get('score', 0) < -15 else 'maintain normal buying pace'}.")
+    return bullets if bullets else ["• [OUTLOOK] Market data loading — check back shortly."]
+
+
+def fetch_daily_insight(md, sig, cot, roll, outlook):
+    """Orchestrator: check caches, generate if needed, persist."""
+    global _insight_cache
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # 1. In-memory cache
+    if _insight_cache["data"] and _insight_cache["data"].get("generated_date") == today:
+        return _insight_cache["data"]
+
+    # 2. File cache
+    if DAILY_INSIGHT_FILE.exists():
+        try:
+            with open(DAILY_INSIGHT_FILE) as f:
+                cached = json.load(f)
+            if cached.get("generated_date") == today:
+                _insight_cache["data"] = cached
+                return cached
+        except Exception:
+            pass
+
+    # 3. Generate new
+    print("[INFO] Generating daily market insight...")
+    headlines = _fetch_google_news_headlines()
+    bullets = None
+    source = "ai"
+    try:
+        bullets = _claude_daily_insight(md, sig, cot, roll, outlook, headlines)
+    except Exception as e:
+        print(f"[WARN] Claude daily insight failed ({e}), using fallback")
+
+    if not bullets:
+        bullets = _fallback_insight(md, sig, cot, roll, outlook)
+        source = "template"
+
+    result = {
+        "bullets": bullets,
+        "headlines": headlines[:8],
+        "generated_date": today,
+        "generated_time": datetime.now().strftime("%H:%M"),
+        "source": source,
+    }
+
+    # Persist
+    try:
+        with open(DAILY_INSIGHT_FILE, "w") as f:
+            json.dump(result, f, indent=2)
+    except Exception as e:
+        print(f"[WARN] Could not save daily insight: {e}")
+
+    _insight_cache["data"] = result
+    return result
+
+
+def _claude_intel(text):
+    """Use Claude Haiku to extract trading signals from broker notes."""
+    import anthropic
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key or api_key == "YOUR_KEY_HERE":
+        return None
+
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        system=(
+            "You are a copper market analyst at a scrap metal recycler. "
+            "Extract trading signals from the broker notes provided. "
+            "Return ONLY a JSON array (no markdown, no wrapping) of signal objects. "
+            "Each signal must have exactly these keys:\n"
+            '  "short": one of "bull", "bear", or "watch" (next-few-days outlook)\n'
+            '  "long": one of "bull", "bear", or "watch" (weeks/months outlook)\n'
+            '  "headline": short title (max 6 words)\n'
+            '  "near": one sentence plain-English explanation of near-term impact\n'
+            '  "far": one sentence plain-English explanation of bigger-picture impact\n'
+            "Focus on copper-relevant signals only. "
+            "If the text contains nothing relevant to copper markets, return an empty array [].\n"
+            "Return at most 8 signals. Prioritize the most actionable ones."
+        ),
+        messages=[{"role": "user", "content": text}],
+        timeout=15.0,
+    )
+    raw_json = resp.content[0].text.strip()
+    # Strip markdown fences if model wraps them
+    if raw_json.startswith("```"):
+        raw_json = raw_json.split("\n", 1)[1] if "\n" in raw_json else raw_json[3:]
+        if raw_json.endswith("```"):
+            raw_json = raw_json[:-3].strip()
+    signals = json.loads(raw_json)
+    # Validate structure
+    valid = []
+    for s in signals:
+        if isinstance(s, dict) and all(k in s for k in ("short", "long", "headline", "near", "far")):
+            s["short"] = s["short"] if s["short"] in ("bull", "bear", "watch") else "watch"
+            s["long"] = s["long"] if s["long"] in ("bull", "bear", "watch") else "watch"
+            valid.append(s)
+    return valid[:8]
+
+
+def save_broker_intel(text):
+    """Save broker intel and extract signals. Uses Claude AI with keyword fallback."""
+    # Try Claude first, fall back to keywords
+    try:
+        signals = _claude_intel(text)
+    except Exception as e:
+        print(f"[WARN] Claude intel failed ({e}), using keyword fallback")
+        signals = None
+
+    if signals is None:
+        signals = _keyword_intel(text)
 
     data = {
         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -2250,7 +3854,7 @@ def get_ship_aware_fix_suggestions(pos, schedule):
     return fix_list
 
 
-def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
+def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None, options_oi=None):
     if not sig: return ["Unable to fetch market data"]
     p = md["price"] if md else 0; ft = CFG["FIX_TARGET"]
     intel = load_broker_intel()
@@ -2401,6 +4005,28 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
     elif china.get("status") == "CLOSED" and china.get("reason") == "Lunar New Year":
         watch.append(china.get("detail", "SHFE closed"))
 
+    # Options OI walls — proximity alerts
+    if options_oi and p > 0:
+        pw = options_oi.get("put_wall")
+        cw = options_oi.get("call_wall")
+        mp = options_oi.get("max_pain")
+        if pw:
+            pw_dist = (p - pw["strike"])
+            if 0 <= pw_dist <= 0.05:
+                watch.append(f"\U0001F7E2 PUT WALL ${pw['strike']:.2f} ({pw['oi']:,} contracts) — {pw_dist * 100:.0f}c above institutional support")
+            elif pw_dist < 0 and pw_dist >= -0.10:
+                watch.append(f"\U0001F534 BELOW PUT WALL ${pw['strike']:.2f} ({pw['oi']:,} contracts) — {abs(pw_dist) * 100:.0f}c below support")
+        if cw:
+            cw_dist = (cw["strike"] - p)
+            if 0 <= cw_dist <= 0.05:
+                watch.append(f"\U0001F534 CALL WALL ${cw['strike']:.2f} ({cw['oi']:,} contracts) — {cw_dist * 100:.0f}c below institutional resistance")
+            elif cw_dist < 0 and cw_dist >= -0.10:
+                watch.append(f"\U0001F7E2 ABOVE CALL WALL ${cw['strike']:.2f} ({cw['oi']:,} contracts) — breakout {abs(cw_dist) * 100:.0f}c above resistance")
+        if mp:
+            mp_dist = abs(p - mp["strike"])
+            if mp_dist <= 0.03:
+                watch.append(f"MAX PAIN ${mp['strike']:.2f} — price at expiry magnet ({mp_dist * 100:.0f}c away)")
+
     # Extended streak
     if streak >= 4 and streak_dir == "up":
         watch.append(f"{streak}-day up streak \u2014 extended rally, pullback risk rising")
@@ -2479,12 +4105,55 @@ def gen_decisions(sig, risk, md, fix_window, roll=None, cot=None, pos=None):
     return dec
 
 
+_position_cache = {"path": None, "mtime": 0, "pos": None, "ts": 0}
+_POSITION_CACHE_TTL = 60  # seconds — re-read xlsx at most once per minute
+
 def load_position():
+    # Spreadsheet is primary — Jorge's curated source of truth
     hf = find_latest_hedge_file()
     if hf:
+        try:
+            mtime = os.path.getmtime(hf)
+        except OSError:
+            mtime = 0
+        now = time.time()
+        cached = _position_cache
+        if (cached["pos"] and cached["path"] == hf and cached["mtime"] == mtime
+                and (now - cached["ts"]) < _POSITION_CACHE_TTL):
+            return cached["pos"]
+
         print(f"[INFO] Reading: {os.path.basename(hf)}")
         pos = read_hedge_spreadsheet(hf)
-        if pos: return pos
+        if pos:
+            pos["data_source"] = pos.get("source_file", "spreadsheet")
+            # Override avg_cost with ROM per-grade costs (grossed up for ICW)
+            try:
+                from rom import _fetch_inv_avg_costs, calc_blended_avg_cost
+                grade_costs = _fetch_inv_avg_costs()
+                if grade_costs:
+                    inv_by_commodity = pos.get("inv_by_commodity", {})
+                    icw_cu_lbs = pos.get("icw_cu_lbs", 0)
+                    blended = calc_blended_avg_cost(grade_costs, inv_by_commodity, icw_cu_lbs)
+                    if blended > 0:
+                        pos["avg_cost"] = blended
+                        pos["grade_costs"] = grade_costs
+                        print(f"[INFO] Avg cost from ROM: ${blended:.4f}/lb (grades: {grade_costs})")
+            except Exception as e:
+                print(f"[WARN] ROM cost overlay failed, using spreadsheet avg_cost: {e}")
+            _position_cache.update({"path": hf, "mtime": mtime, "pos": pos, "ts": now})
+            return pos
+
+    # Fallback to ROM if no spreadsheet available
+    try:
+        from rom import read_rom_position
+        pos = read_rom_position()
+        if pos:
+            pos.setdefault("data_source", "ROM")
+            return pos
+    except Exception as e:
+        print(f"[WARN] ROM unavailable: {e}")
+
+    # Last resort: CSV
     if POSITION_CSV.exists():
         try:
             with open(POSITION_CSV, "r") as f:
@@ -2493,7 +4162,7 @@ def load_position():
                     r = rows[0]
                     return {"net_lbs": float(r.get("net_copper_lbs", 0)), "avg_cost": float(r.get("avg_cost_per_lb", 0)),
                             "hedge_lbs": float(r.get("hedge_lbs", 0)), "updated": r.get("date", "unknown"),
-                            "source_file": "geomet_position.csv"}
+                            "source_file": "geomet_position.csv", "data_source": "CSV"}
         except Exception as e: print(f"[ERROR] CSV: {e}")
     return None
 
@@ -2506,8 +4175,31 @@ _USERS = {
     "jorge": hashlib.sha256(b"geomet").hexdigest(),
     "mikel": hashlib.sha256(b"geomet").hexdigest(),
 }
-_sessions = {}  # token -> {"user": ..., "created": timestamp}
-SESSION_MAX_AGE = 86400 * 7  # 7 days
+SESSIONS_FILE = DATA_DIR / "sessions.json"
+SESSION_MAX_AGE = 86400 * 30  # 30 days
+
+def _load_sessions():
+    if not SESSIONS_FILE.exists():
+        return {}
+    try:
+        with open(SESSIONS_FILE) as f:
+            data = json.load(f)
+        # Drop expired entries on load
+        cutoff = time.time() - SESSION_MAX_AGE
+        return {t: s for t, s in data.items() if s.get("created", 0) > cutoff}
+    except Exception as e:
+        print(f"[WARN] Failed to load sessions: {e}")
+        return {}
+
+def _save_sessions():
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(SESSIONS_FILE, "w") as f:
+            json.dump(_sessions, f)
+    except Exception as e:
+        print(f"[WARN] Failed to save sessions: {e}")
+
+_sessions = _load_sessions()  # token -> {"user": ..., "created": timestamp}
 
 def _check_session(cookie_header):
     if not cookie_header: return None
@@ -2518,12 +4210,15 @@ def _check_session(cookie_header):
     s = _sessions.get(token)
     if s and (time.time() - s["created"]) < SESSION_MAX_AGE:
         return s["user"]
-    _sessions.pop(token, None)
+    if token in _sessions:
+        _sessions.pop(token, None)
+        _save_sessions()
     return None
 
 def _create_session(user):
     token = secrets.token_hex(32)
     _sessions[token] = {"user": user, "created": time.time()}
+    _save_sessions()
     return token
 
 LOGIN_PAGE = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2543,9 +4238,9 @@ button:hover{background:rgba(212,132,90,.25)}
 </style></head><body>
 <div class="box"><div class="logo">GEOMET</div><h2>Copper Intelligence Dashboard</h2>
 <div class="err" id="err">Invalid username or password</div>
-<form method="POST" action="/login">
-<input name="user" placeholder="Username" autocomplete="username" required>
-<input name="pass" type="password" placeholder="Password" autocomplete="current-password" required>
+<form id="login-form" method="POST" action="/login">
+<input id="username" name="user" placeholder="Username" autocomplete="username" required>
+<input id="password" name="pass" type="password" placeholder="Password" autocomplete="current-password" required>
 <button type="submit">LOGIN</button></form></div>
 <script>if(location.search.includes('err=1'))document.getElementById('err').style.display='block'</script>
 </body></html>"""
@@ -2576,7 +4271,8 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/logout":
             c = SimpleCookie()
             c.load(self.headers.get("Cookie") or "")
-            if "session" in c: _sessions.pop(c["session"].value, None)
+            if "session" in c and _sessions.pop(c["session"].value, None):
+                _save_sessions()
             self.send_response(302)
             self.send_header("Set-Cookie", "session=; Path=/; Max-Age=0")
             self.send_header("Location", "/login"); self.end_headers(); return
@@ -2597,6 +4293,35 @@ class Handler(SimpleHTTPRequestHandler):
             intel = load_broker_intel()
             self.wfile.write(json.dumps(intel or {}).encode())
             return
+        if self.path == "/api/debug/rom-compare":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            compare = {"rom": None, "spreadsheet": None, "diff": {}}
+            try:
+                from rom import read_rom_position
+                compare["rom"] = read_rom_position()
+            except Exception as e:
+                compare["rom_error"] = str(e)
+            hf = find_latest_hedge_file()
+            if hf:
+                compare["spreadsheet"] = read_hedge_spreadsheet(hf)
+            if compare["rom"] and compare["spreadsheet"]:
+                r, s = compare["rom"], compare["spreadsheet"]
+                for key in ["net_lbs", "avg_cost", "total_inv_po", "inventory_cu_lbs",
+                            "po_lbs", "priced_sales_lbs", "unpriced_sales_lbs",
+                            "comex_futures", "lme_futures"]:
+                    rv = r.get(key, 0) or 0
+                    sv = s.get(key, 0) or 0
+                    compare["diff"][key] = {"rom": rv, "spreadsheet": sv,
+                                            "delta": round(rv - sv, 2)}
+                for grade in ["BB", "#1", "#2", "Chops"]:
+                    ri = (r.get("inv_by_commodity") or {}).get(grade, 0)
+                    si = (s.get("inv_by_commodity") or {}).get(grade, 0)
+                    compare["diff"][f"inv_{grade}"] = {"rom": ri, "spreadsheet": si,
+                                                       "delta": round(ri - si, 2)}
+            self.wfile.write(json.dumps(compare, default=str).encode())
+            return
         if self.path == "/api/data":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -2610,16 +4335,81 @@ class Handler(SimpleHTTPRequestHandler):
                 prev = rt.get("prev_close") or md.get("daily_prev_settle", md["prev_close"])
                 md["price"] = rt["price"]
                 md["prev_close"] = prev
-                md["change"] = round(rt["price"] - prev, 4)
-                md["change_pct"] = round(((rt["price"] - prev) / prev) * 100, 2) if prev else 0
+                # Use TradingView's session-accurate change if available
+                if rt.get("change") is not None and rt.get("source") == "tradingview":
+                    md["change"] = rt["change"]
+                    md["change_pct"] = rt["change_pct"] or 0
+                else:
+                    md["change"] = round(rt["price"] - prev, 4)
+                    md["change_pct"] = round(((rt["price"] - prev) / prev) * 100, 2) if prev else 0
                 md["copper_source"] = rt.get("source", md.get("copper_source", ""))
                 # Tell frontend which contract the big price represents
                 md["active_contract"] = rt.get("active_contract", "front")
                 # Recalculate COMEX-LME spread with RT price
-                if md.get("lme_price_lb"):
+                # Only override if we don't have a locked peak-hours snapshot
+                if md.get("lme_price_lb") and md.get("spread_timing") != "peak":
                     md["comex_lme_spread"] = round(rt["price"] - md["lme_price_lb"], 4)
             sig = compute_signals(md)
             pos = load_position()
+            # Compare ROM vs spreadsheet — itemized discrepancies with dollar impact
+            # Runs regardless of which source is primary, as long as ROM is reachable
+            rom_note = None
+            try:
+                from rom import read_rom_position
+                rom_pos = read_rom_position() if pos else None
+                # Overlay ROM-derived live ship schedule onto pos (spreadsheet has none)
+                if pos and rom_pos and rom_pos.get("ship_schedule"):
+                    pos["ship_schedule"] = rom_pos["ship_schedule"]
+                ss_pos = pos if pos and pos.get("data_source") != "ROM" else None
+                if not ss_pos:
+                    _hf = find_latest_hedge_file()
+                    if _hf:
+                        ss_pos = read_hedge_spreadsheet(_hf)
+                if rom_pos and ss_pos:
+                    price = md.get("price", 5.0) if md else 5.0
+                    items = []
+                    # Priced sales — biggest potential impact
+                    rp = rom_pos.get("priced_sales_lbs", 0) or 0
+                    sp = ss_pos.get("priced_sales_lbs", 0) or 0
+                    dp = rp - sp
+                    if abs(dp) > 10000:
+                        items.append({"label": "Priced Sales", "rom": round(rp), "ss": round(sp),
+                            "delta_lbs": round(dp), "dollar": round(abs(dp) * price),
+                            "why": "ROM likely includes fulfilled orders never closed in system",
+                            "action": "Review old priced SOs in ROM — close completed ones"})
+                    # Priced avg price
+                    ra = rom_pos.get("priced_sales_avg", 0) or 0
+                    sa = ss_pos.get("priced_sales_avg", 0) or 0
+                    da = ra - sa
+                    if abs(da) > 0.10 and rp > 0:
+                        items.append({"label": "Avg Priced Price", "rom": round(ra, 4), "ss": round(sa, 4),
+                            "delta_lbs": 0, "dollar": round(abs(da) * rp),
+                            "why": "Old orders at lower historical prices drag ROM average down",
+                            "action": "Affects margin projection — resolves when stale SOs are closed"})
+                    # Unpriced sales
+                    ru = rom_pos.get("unpriced_sales_lbs", 0) or 0
+                    su = ss_pos.get("unpriced_sales_lbs", 0) or 0
+                    du = ru - su
+                    if abs(du) > 10000:
+                        items.append({"label": "Unpriced Sales", "rom": round(ru), "ss": round(su),
+                            "delta_lbs": round(du), "dollar": round(abs(du) * price),
+                            "why": "Small variance in open unpriced order count",
+                            "action": "Low priority — numbers are close"})
+                    # Inventory
+                    ri = rom_pos.get("inventory_cu_lbs", 0) or 0
+                    si = ss_pos.get("inventory_cu_lbs", 0) or 0
+                    di = ri - si
+                    if abs(di) > 10000:
+                        items.append({"label": "Inventory", "rom": round(ri), "ss": round(si),
+                            "delta_lbs": round(di), "dollar": round(abs(di) * price),
+                            "why": "Both from spreadsheet — rounding or unmapped items",
+                            "action": "Check if minor grades are missing from grade mapping"})
+                    # Sort by dollar impact descending
+                    items.sort(key=lambda x: x["dollar"], reverse=True)
+                    if items:
+                        rom_note = {"items": items, "ss_file": ss_pos.get("source_file", "")}
+            except Exception:
+                pass
             risk = calc_risk(pos, md)
             if risk:
                 risk["baseline_lbs"] = CFG["BASELINE_LBS"]
@@ -2638,6 +4428,7 @@ class Handler(SimpleHTTPRequestHandler):
                     roll["calendar_spread"] = spread
                     roll["market_structure"] = "contango" if spread > 0.001 else "backwardation" if spread < -0.001 else "flat"
             cot = fetch_cot_data()
+            options_oi = fetch_options_oi()
             # Price + OI change since last COT report date
             cot_context = None
             if cot and md and md.get("sparkline"):
@@ -2667,26 +4458,34 @@ class Handler(SimpleHTTPRequestHandler):
                                 cot_context["interp"] = "OI down + price up \u2192 shorts covering"
                             elif oi_delta < -500 and price_delta < -0.01:
                                 cot_context["interp"] = "OI down + price down \u2192 longs liquidating"
-            dec = gen_decisions(sig, risk, md, fix_window, roll, cot=cot, pos=pos)
+            outlook = calc_price_outlook(sig, md, cot, roll, options_oi)
+            dec = gen_decisions(sig, risk, md, fix_window, roll, cot=cot, pos=pos, options_oi=options_oi)
             gtc = gen_gtc(pos, md)
             gtc_placed = enrich_gtc_orders(load_gtc_orders(), md)
             margin = calc_margin_projection(pos, md, risk)
             fixable = calc_fixable_orders(pos, md)
-            schedule = load_ship_schedule()
+            # Prefer ROM-derived schedule (live from TransAppointments). Fall back
+            # to file-based ship_schedule.json when ROM has none.
+            schedule = (pos.get("ship_schedule") if pos else None) or load_ship_schedule()
+            daily_insight = fetch_daily_insight(md, sig, cot, roll, outlook)
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "gtc_placed": gtc_placed,
-                "fix_window": fix_window, "fixable_orders": fixable,
+                "fix_window": fix_window, "fixable_orders": fixable, "outlook": outlook,
                 "margin_projection": margin, "contract_roll": roll,
-                "cot": cot, "cot_context": cot_context,
-                "ship_schedule": schedule,
-                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"], "position_range_min": CFG["POSITION_RANGE_MIN"], "position_range_max": CFG["POSITION_RANGE_MAX"]},
+                "cot": cot, "cot_context": cot_context, "options_oi": options_oi,
+                "ship_schedule": schedule, "daily_insight": daily_insight,
+                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"], "position_range_min": CFG["POSITION_RANGE_MIN"], "position_range_max": CFG["POSITION_RANGE_MAX"], "market_rates": CFG.get("MARKET_RATES", {}), "market_rates_lme": CFG.get("MARKET_RATES_LME_AT_UPDATE", 0), "market_rates_date": CFG.get("MARKET_RATES_DATE", ""), "market_rates_stale": CFG.get("MARKET_RATES_STALE_THRESHOLD", 0.15), "icw_recovery": CFG.get("ICW_RECOVERY", {}), "custom_levels": CFG.get("CUSTOM_LEVELS", [])},
+                "data_source": pos.get("data_source", "unknown") if pos else "none",
+                "rom_note": rom_note,
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             self.wfile.write(json.dumps(payload).encode())
             return
-        if self.path in ("/", ""): self.path = "/index.html"
-        fp = STATIC_DIR / self.path.lstrip("/")
+        # Strip query string before file lookup so ?param=1 still resolves
+        path_only = self.path.split("?", 1)[0]
+        if path_only in ("/", ""): path_only = "/index.html"
+        fp = STATIC_DIR / path_only.lstrip("/")
         if fp.exists() and fp.is_file():
             self.send_response(200)
             ext = fp.suffix.lower()
@@ -2817,8 +4616,10 @@ def main():
     if hf: print(f"  Hedge file: {os.path.basename(hf)}")
     print("=" * 55)
     print()
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+    class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+    with ThreadedServer(("", PORT), Handler) as httpd:
         httpd.serve_forever()
 
 if __name__ == "__main__":
