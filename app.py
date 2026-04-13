@@ -52,7 +52,10 @@ def load_config():
         "MARKET_RATES_DATE": "",
         "MARKET_RATES_STALE_THRESHOLD": 0.05,
         "ICW_RECOVERY": {},
-        "CUSTOM_LEVELS": [],
+        "CUSTOM_LEVELS": [
+            {"price": 6.00, "label": "$6.00 Resistance (Bloomberg 4/13)"},
+            {"price": 6.50, "label": "Jan highs (Bloomberg 4/13)"},
+        ],
     }
     if cfg_path.exists():
         try:
@@ -153,6 +156,7 @@ def fetch_lme_price():
     # When LME is closed, use cached/persisted price
     if not lme_open:
         if _lme_cache["price_lb"]:
+            _lme_cache["source"] = "cached"
             return _lme_cache
         if LME_PRICE_FILE.exists():
             try:
@@ -3012,21 +3016,15 @@ def fetch_copper_data():
         spread_pct = round((spread / lme_price) * 100, 2) if lme_price and spread else None
         spread_intel = None
         lme_change = None; lme_change_pct = None; lme_prev_lb = None
-        # Use live WebSocket change data when available
-        if lme_source == "live" and lme.get("change_lb") is not None:
-            lme_change = lme["change_lb"]
-            lme_change_pct = lme.get("change_pct")
-        elif spread is not None and lme_price:
-            # Fallback: derive change from spread history
-            history_for_change = load_spread_history()
-            if len(history_for_change) >= 2:
-                for i in range(len(history_for_change) - 2, -1, -1):
-                    prev_lme = history_for_change[i].get("lme")
-                    if prev_lme and prev_lme != lme_price:
-                        lme_prev_lb = prev_lme
-                        lme_change = round(lme_price - lme_prev_lb, 4)
-                        lme_change_pct = round((lme_change / lme_prev_lb) * 100, 2)
-                        break
+        # Compute LME change from official 3M settlement (not TradingView CFD prev_close)
+        warehouse = get_warehouse_data()
+        _lme_settle_mt = warehouse.get("lme", {}).get("lme_3m_settle_mt") if warehouse else None
+        if lme_price and _lme_settle_mt:
+            settle_lb = round(_lme_settle_mt / MT_TO_LB, 4)
+            if settle_lb and abs(settle_lb - lme_price) > 0.0001:
+                lme_prev_lb = settle_lb
+                lme_change = round(lme_price - settle_lb, 4)
+                lme_change_pct = round((lme_change / settle_lb) * 100, 2)
         if spread is not None and lme_price:
             history = load_spread_history()
             spread_intel = compute_spread_intelligence(history, spread)
@@ -3036,7 +3034,6 @@ def fetch_copper_data():
         lme_status = lme_st
         comex_status = comex_st
         fed = fetch_fed_data()
-        warehouse = get_warehouse_data()
 
         # LME sparkline from spread history
         lme_spark = []
