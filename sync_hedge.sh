@@ -3,7 +3,7 @@
 # Runs via launchd every 5 minutes
 # Uses Finder via osascript to bypass macOS TCC restrictions on ~/Library/CloudStorage
 
-DST="$HOME/geomet-copper-dashboard/data"
+DST="$HOME/Claude/geomet-copper-dashboard/data"
 mkdir -p "$DST"
 
 result=$(osascript -e "

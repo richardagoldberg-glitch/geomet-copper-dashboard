@@ -57,10 +57,10 @@ CUSTOMER_HOURS = {
 # Update when the market moves. Dashboard nudges you when LME drifts.
 # "basis": "3m" = % of LME 3-month, "cash" = % of LME cash settlement
 MARKET_RATES = {
-    "BB":    {"pct": 0.972, "basis": "3m"},      # 97.2% of 3M LME
-    "#1":    {"pct": 0.947, "basis": "3m"},      # 94.7% of 3M LME
-    "#2":    {"pct": 0.923, "basis": "3m"},      # 92.3% of 3M LME
-    "Chops": {"pct": 0.935, "basis": "3m"},      # 93.5% of 3M LME
+    "BB":    {"pct": 0.973, "basis": "3m"},                              # 97.3% of 3M LME
+    "#1":    {"type": "flat", "discount": 0.5450, "basis": "comex_next"}, # Sep COMEX - $0.5450 (Kataman 5/12)
+    "#2":    {"type": "flat", "discount": 0.70, "basis": "comex_next"},   # Sep COMEX - $0.70 (Kataman 5/12)
+    "Chops": {"pct": 0.941, "basis": "3m"},                              # 94.1% of 3M LME
 }
 
 # Insulated wire grades — derived sale rate = Chops rate × recovery %
@@ -73,7 +73,8 @@ ICW_RECOVERY = {
     "#2 Ins": 0.42,   # 42% Cu (CUINS2 in ROM)
 }
 MARKET_RATES_LME_AT_UPDATE = 0      # LME $/lb when you last set rates (0 = skip stale check)
-MARKET_RATES_DATE = "2026-04-08"    # date you last updated
+MARKET_RATES_COMEX_STAMP = 6.54     # COMEX spot $/lb when indications were captured
+MARKET_RATES_DATE = "2026-05-12"    # date you last updated
 MARKET_RATES_STALE_THRESHOLD = 0.05 # nudge if LME moves > $0.05/lb (~$110/MT) from update price
 
 # Custom price levels — pin levels from your broker, Bloomberg, or experience

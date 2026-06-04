@@ -112,9 +112,10 @@ COPPER_INV_IDS = {
     "Chops": [1445, 1447, 1534],        # BB Chops (CUCHOP CUBB), #1A Medium (CUCHOP1A_M), #2 Chops (CUCHOPS2)
     "ICW":   [1141, 1010, 1216, 1384,   # CUINS1, CUINS2, CUINS1LITE, CUINS2HIGH
               1011, 1012, 1014, 1169,    # CUINSLOW, CUINSXMAS, HARNESS, JELLYWIRE
-              1361,                      # Extra Low Grade Wire (<25%)
               1007, 1008, 1170,          # MCM, THHN, WAVEOPENCU
-              1842, 1843],              # CUINS1FEED, CUINS2FEED (pre-chopped)
+              1842, 1843,               # CUINS1FEED, CUINS2FEED (pre-chopped)
+              1177],                   # ALUMBX (Aluminum BX — 63% Cu)
+    # Note: 1361 (CUINS<25%) excluded — sold as-is, not chopped
 }
 
 # ShortName lookup for item display (InventoryID → ShortName)
@@ -126,6 +127,7 @@ _INV_SHORTNAME = {
     1169: "JELLYWIRE", 1361: "CUINS<25%",
     1007: "MCM", 1008: "THHN", 1170: "WAVEOPENCU",
     1842: "CUINS1FEED", 1843: "CUINS2FEED",
+    1177: "ALUMBX",
 }
 
 # Copper recovery rate per InventoryID (what % of as-is weight is copper)
@@ -156,6 +158,7 @@ CU_RECOVERY_PCT = {
     1014: 0.45,   # HARNESS
     1169: 0.38,   # JELLYWIRE
     1361: 0.18,   # CUINS<25%
+    1177: 0.63,   # ALUMBX (Aluminum BX)
 }
 
 
@@ -269,11 +272,30 @@ def _fetch_inv_avg_costs():
     if "ICW" in result:
         result["Chops"] = result["ICW"]
 
-    # Attach ICW detail for frontend sub-rows
+    # Attach ICW detail for frontend sub-rows, sorted by 180-day purchase volume
     icw_items = grade_items.get("ICW", [])
+    icw_ids_csv = ",".join(str(it["inv_id"]) for it in icw_items) if icw_items else ""
+    vol_by_id = {}
+    if icw_ids_csv:
+        try:
+            vol_rows = query_rom(
+                f"SELECT d.ShippedAsID, SUM(d.Gross - d.Tare) AS TotalLbs "
+                f"FROM TruckScaleDTL d "
+                f"JOIN TruckScaleHDR h ON d.TrackingID = h.TrackingID AND d.CompanyID = h.CompanyID "
+                f"WHERE d.ShippedAsID IN ({icw_ids_csv}) "
+                f"AND h.TimeCompleted >= DATEADD(day, -180, GETDATE()) "
+                f"GROUP BY d.ShippedAsID"
+            )
+            for vr in vol_rows:
+                vol_by_id[vr["ShippedAsID"]] = float(vr.get("TotalLbs") or 0)
+        except Exception as e:
+            print(f"[WARN] ICW volume query failed: {e}")
+    # Include items with inventory OR a valid purchase cost (feedstocks
+    # may have 0 lbs on hand because they've been chopped, but cost matters)
     result["icw_detail"] = sorted(
-        [it for it in icw_items if it["lbs"] > 0],
-        key=lambda x: x["lbs"], reverse=True,
+        [it for it in icw_items if it["lbs"] > 0 or it.get("avg_purch", 0) > 0],
+        key=lambda x: vol_by_id.get(x["inv_id"], 0),
+        reverse=True,
     )
 
     _inv_cost_cache["data"] = result

@@ -30,6 +30,7 @@ BROKER_INTEL_FILE = DATA_DIR / "broker_intel.json"
 SHIP_SCHEDULE_FILE = DATA_DIR / "ship_schedule.json"
 DAILY_INSIGHT_FILE = DATA_DIR / "daily_insight.json"
 OPTIONS_OI_FILE = DATA_DIR / "options_oi.json"
+MARKET_RATES_FILE = DATA_DIR / "market_rates.json"
 STATIC_DIR = Path(__file__).parent / "static"
 PORT = 8777
 
@@ -47,7 +48,7 @@ def load_config():
         "FED_FUNDS_RATE": "4.25-4.50", "FED_FUNDS_MIDPOINT": 4.375,
         "MONTHLY_FLOW": {"Chops": 171800, "BB": 162700, "#2": 106600, "#1": 82700},
         "CUSTOMER_HOURS": {},
-        "MARKET_RATES": {"BB": {"pct": 0.965, "basis": "3m"}, "#1": {"pct": 0.94, "basis": "cash"}, "#2": {"pct": 0.91, "basis": "cash"}, "Chops": {"pct": 0.94, "basis": "cash"}},
+        "MARKET_RATES": {"BB": {"type": "flat", "discount": 0.15, "basis": "comex_front"}, "#1": {"pct": 0.94, "basis": "cash"}, "#2": {"pct": 0.91, "basis": "cash"}, "Chops": {"pct": 0.94, "basis": "cash"}},
         "MARKET_RATES_LME_AT_UPDATE": 0,
         "MARKET_RATES_DATE": "",
         "MARKET_RATES_STALE_THRESHOLD": 0.05,
@@ -609,10 +610,12 @@ def _fetch_realtime_price():
         tv_change_pct = _tv_state["change_pct"]
 
     if tv_price and tv_age < 120:  # Accept if data is < 2 min old
+        # HG1! is a continuous contract — near FND it rolls to the next month
+        _, tv_active = _get_active_yf_ticker()
         _rt_cache = {"price": tv_price, "prev_close": tv_prev,
                      "change": tv_change, "change_pct": tv_change_pct,
                      "timestamp": now, "source": "tradingview",
-                     "active_contract": "front"}
+                     "active_contract": tv_active}
         return _rt_cache
 
     # Method 2: yfinance fallback (15-30 min delayed, 1-min cache)
@@ -2409,6 +2412,14 @@ def get_contract_roll(copper_price=None):
         if tv2_price and tv2_age < 120:
             result["next_price"] = tv2_price
             result["next_source"] = "tradingview"
+            # Pass change data for next month (hero contract)
+            with _tv_lock:
+                tv2_ch = _tv_state_2.get("change")
+                tv2_chp = _tv_state_2.get("change_pct")
+            if tv2_ch is not None:
+                result["next_change"] = tv2_ch
+            if tv2_chp is not None:
+                result["next_change_pct"] = tv2_chp
             print(f"[INFO] Next month (HG2! via TV): ${tv2_price:.4f}")
         else:
             try:
@@ -2872,6 +2883,22 @@ def fetch_copper_data():
         change = price - prev_close
         change_pct = (change / prev_close) * 100 if prev_close else 0
 
+        # Fix for contract roll: HG=F continuous data has a gap when the front
+        # month rolls (e.g. May→Jul).  closes[-2] is old contract, closes[-1] is
+        # new contract — the diff is a roll gap, not a real price move.
+        # Use the specific front contract's prev settle for an accurate change.
+        try:
+            _active_yf, _ac = _get_active_yf_ticker()
+            if _active_yf and _active_yf != "HG=F":
+                _spec_prev = _fetch_prev_settle_yf(_active_yf)
+                if _spec_prev and abs(_spec_prev - prev_close) > 0.02:
+                    print(f"[INFO] Roll-gap fix: HG=F prev_close ${prev_close:.4f} → {_active_yf} prev ${_spec_prev:.4f}")
+                    prev_close = _spec_prev
+                    change = round(price - prev_close, 4)
+                    change_pct = round((change / prev_close) * 100, 2) if prev_close else 0
+        except Exception as e:
+            print(f"[WARN] Roll-gap prev_close fix failed: {e}")
+
         # Determine previous settlement for RT overlay
         # After 5PM CT: use 4PM settlement from intraday data (daily bar keeps updating)
         # During the day: today's bar is partial, use yesterday's close
@@ -2886,11 +2913,11 @@ def fetch_copper_data():
             if settle:
                 _daily_prev_settle = settle
             elif last_ohlc_date >= today_date and n_closes > 1:
-                _daily_prev_settle = closes[-2]  # fallback: yesterday
+                _daily_prev_settle = prev_close  # use roll-adjusted prev
             else:
                 _daily_prev_settle = closes[-1]
         elif last_ohlc_date >= today_date and n_closes > 1:
-            _daily_prev_settle = closes[-2]
+            _daily_prev_settle = prev_close  # use roll-adjusted prev
         else:
             _daily_prev_settle = closes[-1]
 
@@ -3016,15 +3043,24 @@ def fetch_copper_data():
         spread_pct = round((spread / lme_price) * 100, 2) if lme_price and spread else None
         spread_intel = None
         lme_change = None; lme_change_pct = None; lme_prev_lb = None
-        # Compute LME change from official 3M settlement (not TradingView CFD prev_close)
+        # Prefer TradingView MCU3 daily change (tracks actual trading session, like COMEX)
         warehouse = get_warehouse_data()
-        _lme_settle_mt = warehouse.get("lme", {}).get("lme_3m_settle_mt") if warehouse else None
-        if lme_price and _lme_settle_mt:
-            settle_lb = round(_lme_settle_mt / MT_TO_LB, 4)
-            if settle_lb and abs(settle_lb - lme_price) > 0.0001:
-                lme_prev_lb = settle_lb
-                lme_change = round(lme_price - settle_lb, 4)
-                lme_change_pct = round((lme_change / settle_lb) * 100, 2)
+        with _tv_lock:
+            _tv_ch_mt = _tv_state_lme.get("change_mt")
+            _tv_chp = _tv_state_lme.get("change_pct")
+        if lme_price and _tv_ch_mt is not None and _tv_chp is not None:
+            lme_change = round(_tv_ch_mt / MT_TO_LB, 4)
+            lme_change_pct = round(_tv_chp, 2)
+            lme_prev_lb = round(lme_price - lme_change, 4)
+        else:
+            # Fallback: compute from official 3M settlement (may be stale over weekends)
+            _lme_settle_mt = warehouse.get("lme", {}).get("lme_3m_settle_mt") if warehouse else None
+            if lme_price and _lme_settle_mt:
+                settle_lb = round(_lme_settle_mt / MT_TO_LB, 4)
+                if settle_lb and abs(settle_lb - lme_price) > 0.0001:
+                    lme_prev_lb = settle_lb
+                    lme_change = round(lme_price - settle_lb, 4)
+                    lme_change_pct = round((lme_change / settle_lb) * 100, 2)
         if spread is not None and lme_price:
             history = load_spread_history()
             spread_intel = compute_spread_intelligence(history, spread)
@@ -3255,6 +3291,123 @@ def load_gtc_orders():
 def save_gtc_orders(orders):
     with open(GTC_ORDERS_FILE, "w") as f:
         json.dump(orders, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# MARKET RATES — editable from dashboard, persisted to JSON
+# ---------------------------------------------------------------------------
+
+def load_market_rates():
+    """Load market rates from JSON file, falling back to config.py defaults."""
+    if MARKET_RATES_FILE.exists():
+        try:
+            with open(MARKET_RATES_FILE) as f:
+                data = json.load(f)
+            return data
+        except Exception as e:
+            print(f"[WARN] market_rates.json error: {e}")
+    return None
+
+
+def save_market_rates(rates, source="", sources=None):
+    """Save market rates to JSON, auto-stamping date and current COMEX price.
+    Also builds per-grade quote history (last 3 per grade).
+    sources: optional dict of per-grade source names (overrides global source)."""
+    sources = sources or {}
+    now = datetime.now()
+    with _tv_lock:
+        comex_now = _tv_state["price"] or 0
+        lme_mt = _tv_state_lme.get("price_mt") or 0
+    lme_lb = round(lme_mt / 2204.62, 4) if lme_mt else 0
+
+    # Contract roll prices for COMEX basis resolution
+    _cr = get_contract_roll(comex_now if comex_now else None) or {}
+    cr_next = _cr.get("next_price") or 0
+    cr_third = _cr.get("third_price") or 0
+
+    # Compare against saved rates to detect which grades actually changed
+    existing = load_market_rates()
+    old_rates = existing.get("rates", {}) if existing else {}
+    old_history = existing.get("history", []) if existing else []
+
+    # Build per-grade history entries — only for grades whose formula changed
+    new_history = []
+    date_str = now.strftime("%-m/%-d")
+    hr = now.hour % 12 or 12
+    ampm = "a" if now.hour < 12 else "p"
+    time_str = f"{hr}:{now.strftime('%M')}{ampm}"
+    for grade, mr in rates.items():
+        # Skip if rate is identical to what's already saved
+        prev = old_rates.get(grade, {})
+        if mr == prev:
+            continue
+        entry = {
+            "grade": grade,
+            "source": sources.get(grade, source),
+            "date": date_str,
+            "time": time_str,
+            "comex_stamp": round(comex_now, 4) if comex_now else 0,
+            "lme_stamp": lme_lb,
+        }
+        if mr.get("type") == "flat":
+            # COMEX basis: base - discount
+            basis = mr.get("basis", "comex_next")
+            if basis == "comex_front":
+                base = comex_now
+                entry["basis"] = _cr.get("front_month", {}).get("label", "Front").split()[0] if _cr.get("front_month") else "Front"
+            elif basis == "comex_third":
+                base = cr_third
+                entry["basis"] = _cr.get("third_month", {}).get("label", "Third").split()[0] if _cr.get("third_month") else "Third"
+            else:  # comex_next
+                base = cr_next
+                entry["basis"] = _cr.get("next_month", {}).get("label", "Next").split()[0] if _cr.get("next_month") else "Next"
+            disc = mr.get("discount", 0)
+            entry["formula"] = f"{entry['basis']} -${disc:.4f}"
+            entry["input"] = disc
+            entry["base_price"] = round(base, 4) if base else 0
+            entry["result_lb"] = round(base - disc, 4) if base else 0
+        else:
+            # LME pct basis
+            pct = mr.get("pct", 0)
+            basis = mr.get("basis", "3m")
+            deduct = mr.get("deduct", 0)
+            base = lme_lb if basis != "cash" else lme_lb  # both use lme_lb for now
+            pct_display = round(pct * 1000) / 10
+            entry["basis"] = "3M" if basis != "cash" else "Cash"
+            formula = f"{pct_display}% LME {entry['basis']}"
+            if deduct > 0:
+                formula += f" -${deduct:.2f}"
+                entry["deduct"] = deduct
+            entry["formula"] = formula
+            entry["input"] = pct_display
+            entry["base_price"] = round(base, 4) if base else 0
+            entry["result_lb"] = round(base * pct - deduct, 4) if base else 0
+
+        new_history.append(entry)
+
+    # Prepend new entries, cap at 5 per grade
+    combined = new_history + old_history
+    # Keep last 5 per grade
+    grade_counts = {}
+    trimmed = []
+    for h_entry in combined:
+        g = h_entry.get("grade", "")
+        grade_counts[g] = grade_counts.get(g, 0) + 1
+        if grade_counts[g] <= 5:
+            trimmed.append(h_entry)
+
+    data = {
+        "rates": rates,
+        "date": now.strftime("%Y-%m-%d"),
+        "comex_stamp": round(comex_now, 4) if comex_now else 0,
+        "source": source,
+        "history": trimmed,
+    }
+    DATA_DIR.mkdir(exist_ok=True)
+    with open(MARKET_RATES_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+    return data
+
 
 def enrich_gtc_orders(orders, md):
     """Add distance and trigger info to each placed GTC order."""
@@ -3554,20 +3707,31 @@ def _build_insight_context(md, sig, cot, roll, outlook):
     """Serialize key market data into plain text for Claude prompt."""
     lines = []
     if md:
-        lines.append(f"COMEX Copper: ${md.get('price', 0):.4f}/lb  change: {md.get('change', 0):+.4f} ({md.get('change_pct', 0):+.1f}%)")
+        lines.append(f"COMEX May (front): ${md.get('price', 0):.4f}/lb  change: {md.get('change', 0):+.4f} ({md.get('change_pct', 0):+.1f}%)")
+        if roll and roll.get("next_price"):
+            jul_ch = roll.get("next_change", 0) or 0
+            jul_chp = roll.get("next_change_pct", 0) or 0
+            lines.append(f"COMEX Jul (active month, highest volume): ${roll['next_price']:.4f}/lb  change: {jul_ch:+.4f} ({jul_chp:+.1f}%)")
+        if roll and roll.get("third_price"):
+            lines.append(f"COMEX Sep: ${roll['third_price']:.4f}/lb")
         if md.get("lme_price_lb"):
-            lines.append(f"LME Copper: ${md['lme_price_lb']:.4f}/lb  spread vs COMEX: {md.get('comex_lme_spread', 0):+.4f}")
+            lme_ch = md.get("lme_change", 0) or 0
+            lme_chp = md.get("lme_change_pct", 0) or 0
+            lines.append(f"LME 3M: ${md['lme_price_lb']:.4f}/lb  change: {lme_ch:+.4f} ({lme_chp:+.1f}%)  spread vs COMEX: {md.get('comex_lme_spread', 0):+.4f}")
+        if md.get("lme_cash_lb"):
+            lines.append(f"LME Cash: ${md['lme_cash_lb']:.4f}/lb  cash-3M spread: ${md.get('lme_cash_3m_spread_mt', 0)}/MT")
         if md.get("ma50"):
-            lines.append(f"Moving averages: 50d={md['ma50']:.4f}  100d={md.get('ma100', 0):.4f}  200d={md['ma200']:.4f}")
+            p = md.get("price", 0)
+            lines.append(f"Moving averages: 50d={md['ma50']:.4f} ({('ABOVE' if p>md['ma50'] else 'BELOW')})  100d={md.get('ma100', 0):.4f} ({('ABOVE' if p>md.get('ma100',0) else 'BELOW')})  200d={md['ma200']:.4f} ({('ABOVE' if p>md['ma200'] else 'BELOW')})")
         roc = md.get("roc", {})
         if roc:
             parts = []
-            for k in ("1d", "5d", "20d"):
+            for k in ("1d", "3d", "5d", "10d", "20d"):
                 r = roc.get(k, {})
                 if r.get("pct") is not None:
                     parts.append(f"{k}: {r['pct']:+.1f}%")
             if parts:
-                lines.append(f"Rate of change: {', '.join(parts)}")
+                lines.append(f"Momentum (rate of change): {', '.join(parts)}")
         if md.get("dxy"):
             dxy = md["dxy"]
             lines.append(f"DXY (Dollar Index): {dxy.get('price', 'N/A')} change: {dxy.get('change', 'N/A')}")
@@ -3580,21 +3744,25 @@ def _build_insight_context(md, sig, cot, roll, outlook):
             lines.append(f"  LME: {wh['lme']['mt']:,} MT  trend: {wh['lme'].get('trend', 'N/A')}")
     if sig:
         lines.append(f"Trend: {sig.get('trend', 'N/A')} ({sig.get('trend_strength', '')})")
+        if sig.get("move_type"):
+            lines.append(f"Move type: {sig['move_type']}")
     if cot:
         mm_net = cot.get("mm_net", cot.get("fund_net", "N/A"))
         mm_chg = cot.get("mm_weekly_change", cot.get("fund_net_change", "N/A"))
         mm_pct = cot.get("mm_pct_52w", cot.get("fund_pctile", "N/A"))
         lines.append(f"COT Managed Money Net: {mm_net} contracts  weekly change: {mm_chg}  52w percentile: {mm_pct}%")
     if roll:
-        lines.append(f"Front month: {roll.get('front_month', 'N/A')}  spread: {roll.get('calendar_spread', 'N/A')}  structure: {roll.get('market_structure', 'N/A')}")
+        lines.append(f"Front month: {roll.get('front_month', 'N/A')}  days to FND: {roll.get('days_to_fnd', 'N/A')}  spread: {roll.get('calendar_spread', 'N/A')}  structure: {roll.get('market_structure', 'N/A')}")
         if roll.get("open_interest"):
             oi = roll["open_interest"]
-            lines.append(f"Open Interest: {oi.get('total', 'N/A')}  trend: {oi.get('trend', 'N/A')}")
+            lines.append(f"Open Interest: {oi.get('total', 'N/A')}  trend: {oi.get('trend', 'N/A')}  5d change: {oi.get('change_5d_pct', 'N/A')}%")
     if outlook:
         for tf in ("today", "this_week", "this_month"):
             o = outlook.get(tf)
             if o:
-                lines.append(f"Outlook {tf}: {o.get('label', '')} (score {o.get('score', 0)}, confidence {o.get('confidence', '')})")
+                reasons = "; ".join(o.get("reasons", []))
+                cal = o.get("calendar_note", "")
+                lines.append(f"Outlook {tf}: {o.get('label', '')} (score {o.get('score', 0)}, confidence {o.get('confidence', '')}). Reasons: {reasons}" + (f" Calendar: {cal}" if cal else ""))
     return "\n".join(lines)
 
 
@@ -3617,24 +3785,42 @@ def _claude_daily_insight(md, sig, cot, roll, outlook, headlines):
         f"Today is {datetime.now().strftime('%A, %B %d, %Y')}.\n\n"
         f"CURRENT MARKET DATA:\n{context}"
         f"{headline_text}\n\n"
-        "Write 4-5 bullet points for this morning's copper market briefing. "
+        "Write exactly 5 bullet points for today's copper market briefing. "
         "Label each bullet with one of: [PRICE], [FUNDS], [MACRO], [SUPPLY], [OUTLOOK]. "
-        "The final bullet MUST include an actionable implication for a physical copper buyer. "
-        "Start each bullet with '• [LABEL] ' then the text. No other formatting."
+        "Use all 5 labels, one each, in that order.\n\n"
+        "Guidelines per bullet:\n"
+        "- [PRICE]: Lead with the active month (Jul COMEX). Note where price sits relative to key moving averages and support/resistance. "
+        "Mention if momentum is uniformly negative or positive across timeframes. If price is in a dip within an uptrend, say so explicitly.\n"
+        "- [FUNDS]: Interpret COT data — are funds adding or cutting? Is positioning crowded or has room to run? "
+        "Note whether current positioning supports or threatens the price trend. Mention 52-week percentile context.\n"
+        "- [MACRO]: DXY direction and what it means for copper. Any relevant news headlines (tariffs, China, Fed). "
+        "Connect macro to copper — don't just state facts, say what they mean for price.\n"
+        "- [SUPPLY]: Warehouse stock trends at COMEX and LME. Contango/backwardation structure and what it signals. "
+        "Connect supply data to physical market tightness or looseness.\n"
+        "- [OUTLOOK]: This is the actionable bullet. Tie it all together: given the price action, fund positioning, macro, and supply picture, "
+        "what should a physical copper scrap buyer do today? Be specific about levels to watch (support, resistance, DMA). "
+        "Frame buying advice as: dips in uptrends = stay aggressive on purchasing, rallies = fix/lock open sales orders. "
+        "Mention specific risk: only unpriced long inventory is at market risk on down moves.\n\n"
+        "Start each bullet with '• [LABEL] ' then the text. 2-3 sentences per bullet max. No markdown."
     )
 
     client = anthropic.Anthropic(api_key=api_key)
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+        max_tokens=900,
         system=(
-            "You are a senior copper market analyst writing a morning briefing for Geomet, "
-            "a scrap metal recycler. Your audience buys physical copper scrap and hedges with "
-            "COMEX futures. Write in plain, direct language. Return plain text only: one bullet "
-            "per line starting with '• '. No markdown."
+            "You are a senior copper market analyst writing a daily briefing for Geomet, "
+            "a physical scrap copper recycler based in Texas. They are ALWAYS buying — never on the sidelines. "
+            "Down days are opportunities to outbid competitors. Up days are for fixing/locking open sales orders.\n\n"
+            "Your audience knows copper. Don't explain basics. Be direct, specific, and actionable. "
+            "Reference actual price levels, DMAs, and support/resistance. "
+            "Never minimize dollar risk — every cent/lb matters in a margin business.\n\n"
+            "Key context: 'Unpriced long lbs' (inventory + POs minus priced SOs) is the only real downside risk. "
+            "Unpriced sales orders are margin capture opportunities, not risk.\n\n"
+            "Return plain text only: one bullet per line starting with '• '. No markdown, no headers."
         ),
         messages=[{"role": "user", "content": user_msg}],
-        timeout=20.0,
+        timeout=25.0,
     )
     raw = resp.content[0].text.strip()
     bullets = [line.strip() for line in raw.split("\n") if line.strip().startswith("•")]
@@ -4423,8 +4609,31 @@ class Handler(SimpleHTTPRequestHandler):
             _ac = md.get("active_contract", "front") if md else "front"
             roll = get_contract_roll(md.get("price") if (_ac == "front" and md) else None)
             if roll and _ac == "next" and md:
-                # Big price is May (next). Use it as next_price, fetch front separately.
+                # HG1! has rolled to next month (Jul) — remap prices correctly
+                # md.price (from HG1!) is actually next month (Jul)
                 roll["next_price"] = md["price"]
+                roll["next_source"] = md.get("source", "tradingview")
+                # HG1! change includes the roll gap (Jul_now - May_prev_close) — wrong.
+                # Compute real Jul change from Jul's own previous settle.
+                _jul_ticker = roll.get("next_month", {}).get("ticker", "")
+                _jul_yf = _jul_ticker.replace("HG", "HG", 1) + ".CMX" if _jul_ticker else None
+                if _jul_yf:
+                    _jul_prev = _fetch_prev_settle_yf(_jul_yf)
+                    if _jul_prev and md["price"]:
+                        roll["next_change"] = round(md["price"] - _jul_prev, 4)
+                        roll["next_change_pct"] = round((roll["next_change"] / _jul_prev) * 100, 2)
+                    else:
+                        roll["next_change"] = md.get("change")
+                        roll["next_change_pct"] = md.get("change_pct")
+                else:
+                    roll["next_change"] = md.get("change")
+                    roll["next_change_pct"] = md.get("change_pct")
+                # HG2! (in _tv_state_2) is now the third month (Sep) — remap it
+                with _tv_lock:
+                    _tv2p = _tv_state_2.get("price")
+                    _tv2age = time.time() - _tv_state_2["timestamp"] if _tv_state_2.get("timestamp") else 999
+                if _tv2p and _tv2age < 120:
+                    roll["third_price"] = _tv2p
                 if roll.get("front_price"):
                     spread = round(md["price"] - roll["front_price"], 4)
                     roll["calendar_spread"] = spread
@@ -4470,6 +4679,19 @@ class Handler(SimpleHTTPRequestHandler):
             # to file-based ship_schedule.json when ROM has none.
             schedule = (pos.get("ship_schedule") if pos else None) or load_ship_schedule()
             daily_insight = fetch_daily_insight(md, sig, cot, roll, outlook)
+            # Merge market rates: JSON file overrides config.py defaults
+            _mr_file = load_market_rates()
+            _mr_rates = dict(CFG.get("MARKET_RATES", {}))
+            _mr_date = CFG.get("MARKET_RATES_DATE", "")
+            _mr_comex = CFG.get("MARKET_RATES_COMEX_STAMP", 0)
+            _mr_source = ""
+            _mr_history = []
+            if _mr_file:
+                _mr_rates.update(_mr_file.get("rates", {}))
+                _mr_date = _mr_file.get("date", _mr_date)
+                _mr_comex = _mr_file.get("comex_stamp", _mr_comex)
+                _mr_source = _mr_file.get("source", "")
+                _mr_history = _mr_file.get("history", [])
             payload = {
                 "market": md, "signals": sig, "position": pos, "position_risk": risk,
                 "decisions": dec, "gtc_suggestions": gtc, "gtc_placed": gtc_placed,
@@ -4477,7 +4699,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "margin_projection": margin, "contract_roll": roll,
                 "cot": cot, "cot_context": cot_context, "options_oi": options_oi,
                 "ship_schedule": schedule, "daily_insight": daily_insight,
-                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"], "position_range_min": CFG["POSITION_RANGE_MIN"], "position_range_max": CFG["POSITION_RANGE_MAX"], "market_rates": CFG.get("MARKET_RATES", {}), "market_rates_lme": CFG.get("MARKET_RATES_LME_AT_UPDATE", 0), "market_rates_date": CFG.get("MARKET_RATES_DATE", ""), "market_rates_stale": CFG.get("MARKET_RATES_STALE_THRESHOLD", 0.15), "icw_recovery": CFG.get("ICW_RECOVERY", {}), "custom_levels": CFG.get("CUSTOM_LEVELS", [])},
+                "config": {"fix_target": CFG["FIX_TARGET"], "truckload_lbs": CFG["TRUCKLOAD_LBS"], "gtc_levels": CFG["GTC_LEVELS"], "baseline_lbs": CFG["BASELINE_LBS"], "monthly_flow": CFG["MONTHLY_FLOW"], "position_range_min": CFG["POSITION_RANGE_MIN"], "position_range_max": CFG["POSITION_RANGE_MAX"], "market_rates": _mr_rates, "market_rates_lme": CFG.get("MARKET_RATES_LME_AT_UPDATE", 0), "market_rates_date": _mr_date, "market_rates_comex_stamp": _mr_comex, "market_rates_source": _mr_source, "market_rates_stale": CFG.get("MARKET_RATES_STALE_THRESHOLD", 0.15), "icw_recovery": CFG.get("ICW_RECOVERY", {}), "custom_levels": CFG.get("CUSTOM_LEVELS", []), "quote_history": _mr_history},
                 "data_source": pos.get("data_source", "unknown") if pos else "none",
                 "rom_note": rom_note,
                 "last_refresh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -4530,6 +4752,52 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({"theme": theme}).encode())
+            return
+        if self.path == "/api/market-rates":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            rates = body.get("rates", {})
+            source = body.get("source", "")
+            sources = body.get("sources", {})
+            if rates:
+                data = save_market_rates(rates, source, sources)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "data": data}).encode())
+            else:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"no rates provided"}')
+            return
+        if self.path == "/api/market-rates/delete-quote":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            idx = body.get("index")
+            if idx is not None:
+                existing = load_market_rates()
+                history = existing.get("history", []) if existing else []
+                if 0 <= idx < len(history):
+                    removed = history.pop(idx)
+                    existing["history"] = history
+                    with open(MARKET_RATES_FILE, "w") as f:
+                        json.dump(existing, f, indent=2)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "removed": removed}).encode())
+                else:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"ok":false,"error":"invalid index"}')
+            else:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"no index provided"}')
             return
         if self.path == "/api/intel":
             length = int(self.headers.get("Content-Length", 0))
